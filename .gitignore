@@ -1,0 +1,26 @@
+# Secrets & runtime state — never commit
+auth.json
+audit.log
+modules.json
+notifications.json
+maintenance.json
+schedules.json
+replication.json
+replication_key*
+replication_known_hosts
+network_config.json
+llama_presets.json
+model_job.json
+history.db
+certs/
+token
+*.tmp.*
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor / harness local state
+*.swp
