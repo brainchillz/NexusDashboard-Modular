@@ -1,4 +1,5 @@
 # Nexus Dashboard
+<img width="1472" height="1118" alt="Screenshot 2026-07-04 at 10 12 21 PM" src="https://github.com/user-attachments/assets/05c107b5-c003-4fa9-ab37-d5a5d372616c" />
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
