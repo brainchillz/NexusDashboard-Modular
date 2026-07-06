@@ -22,7 +22,7 @@ def create_app():
     from .core import summary, history, metrics, tasks, alerts
     from .modules import (disks, gpu, logs, zfs, iscsi, nfs, smb, minidlna,
                           replication, maintenance, llama, network, schedules,
-                          lvm, mdraid, firewall)
+                          lvm, mdraid, firewall, docker, docker_compose)
 
     app.before_request(auth.require_login)
     app.after_request(audit._audit_request)
@@ -47,19 +47,21 @@ def create_app():
     feature_modules = (disks, zfs, lvm, mdraid, schedules, replication,
                        maintenance, iscsi, nfs, smb, minidlna, llama, gpu,
                        ct_instances, ct_images, ct_networks, ct_portforward,
-                       firewall)
+                       docker, docker_compose, firewall)
     for mod in feature_modules:
         registry.register_module(mod.MODULE)
     for mod in feature_modules:
         app.register_blueprint(mod.MODULE['blueprint'])
         registry.mark_loaded(mod.MODULE['id'])
 
-    # Console websocket (xterm.js <-> daemon proxy). Not blueprint-scoped, so
-    # it can't ride the runtime gate — the handler re-checks the instances
-    # toggle itself on every connection.
+    # Console websockets (xterm.js <-> daemon proxies). Not blueprint-scoped,
+    # so they can't ride the runtime gate — each handler re-checks its own
+    # module toggle on every connection.
+    from .modules import docker_console
     from flask_sock import Sock
     sock = Sock(app)
     ct_console.register_ws(sock)
+    docker_console.register_ws(sock)
 
     @app.route('/')
     def index():

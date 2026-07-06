@@ -56,10 +56,11 @@ if ! id -u $DASHBOARD_USER &>/dev/null; then
     useradd -r -s /usr/sbin/nologin -M -d $DASHBOARD_DIR $DASHBOARD_USER
 fi
 
-# Containers module: the app talks to the local LXD/Incus socket, which only
-# needs group membership (no sudo). Join whichever group exists; harmless if
-# neither daemon is installed (the containers pages report it unreachable).
-for _g in lxd incus-admin; do
+# Containers + Docker modules: the app talks to the local LXD/Incus/Docker
+# socket, which only needs group membership (no sudo). Join whichever groups
+# exist; harmless if a daemon is not installed (its pages report it
+# unreachable).
+for _g in lxd incus-admin docker; do
     if getent group "$_g" >/dev/null 2>&1; then
         usermod -aG "$_g" $DASHBOARD_USER
         info "Added $DASHBOARD_USER to the $_g group (container management)"

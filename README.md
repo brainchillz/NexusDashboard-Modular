@@ -62,9 +62,16 @@ Nodes upgraded in place from the pre-merge apps keep their original names
 (`storage-dashboard` / `llama-dashboard`); the app follows the
 `DASHBOARD_UNIT_PREFIX` env var its unit file sets (default `storage-dashboard`).
 
-If a host already runs LXD or Incus, the installer adds the service user to
-the socket group and the Containers pages light up; otherwise they simply
-report the daemon unreachable (or disable the modules on the Modules page).
+If a host already runs LXD, Incus or Docker, the installer adds the service
+user to the socket group and the Containers/Docker pages light up; otherwise
+they simply report the daemon unreachable (or disable the modules on the
+Modules page). The Docker pages manage containers, images, volumes and
+networks straight over `/var/run/docker.sock` — create (with auto-pull),
+lifecycle, logs, live stats, an in-browser shell (bash/sh via exec) — plus
+compose stacks: projects already on the host are discovered from their
+compose labels and get stack-level up/down/restart/pull/logs, while stacks
+created in the UI are stored under the app and validated with
+`docker compose config` before they are ever kept.
 
 ## Architecture (short version)
 
@@ -73,7 +80,7 @@ app.py                  # entrypoint + compatibility facade (import app …)
 nexusdash/
   core/                 # auth/RBAC/tokens, audit, TLS, registry, aggregators
   modules/              # disks zfs lvm mdraid schedules replication maintenance
-                        # iscsi nfs smb minidlna llama gpu firewall network logs
+                        # iscsi nfs smb minidlna llama gpu firewall docker network logs
   modules/containers/   # LXD/Incus: instances, images, networks, port-forward, console
 static/js/*.js          # per-category frontend, no build step
 ```

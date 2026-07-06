@@ -10,13 +10,14 @@ import subprocess
 from flask import jsonify
 
 
-def run(args, input_data=None, no_sudo=False):
+def run(args, input_data=None, no_sudo=False, timeout=120):
     """Run a command given as an argument list (NO shell).
 
     Passing a list and shell=False means user-supplied values can never be
     interpreted by a shell, which closes off command injection. ``sudo -n``
     is used so a missing/incorrect sudoers rule fails immediately instead of
-    blocking on a password prompt.
+    blocking on a password prompt. The default timeout suits interactive
+    commands; long operations (compose up/pull) pass their own.
     """
     if isinstance(args, str):
         # Only fixed, trusted command strings should be passed as strings.
@@ -24,7 +25,7 @@ def run(args, input_data=None, no_sudo=False):
     if not no_sudo:
         args = ['sudo', '-n'] + list(args)
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=120, input=input_data)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, input=input_data)
         return r.stdout, r.stderr, r.returncode
     except subprocess.TimeoutExpired:
         return '', 'Command timed out', -1

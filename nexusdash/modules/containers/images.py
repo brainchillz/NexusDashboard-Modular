@@ -201,5 +201,5 @@ def image_copy():
 
 
 # ─── Module descriptor ─────────────────────────────────────────────────
-MODULE = {'id': 'images', 'label': 'Images', 'category': 'Containers',
+MODULE = {'id': 'images', 'label': 'Images', 'category': 'LXD / Incus',
           'blueprint': bp}

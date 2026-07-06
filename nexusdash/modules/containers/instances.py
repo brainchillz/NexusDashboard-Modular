@@ -478,5 +478,5 @@ def profiles_list():
 
 
 # ─── Module descriptor ─────────────────────────────────────────────────
-MODULE = {'id': 'instances', 'label': 'Instances', 'category': 'Containers',
+MODULE = {'id': 'instances', 'label': 'Instances', 'category': 'LXD / Incus',
           'blueprint': bp}

@@ -18,12 +18,16 @@ def test_descriptors_registered_and_derived():
     ids = [m['id'] for m in app.MODULES]
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
-                   'instances', 'images', 'ctnetworks', 'portforward', 'firewall']
+                   'instances', 'images', 'ctnetworks', 'portforward', 'docker',
+                   'compose', 'firewall']
     assert app.MODULE_IDS == set(ids)
-    # The containers group registered with the right nav category.
+    # The containers group registered with the right nav category (split
+    # from a shared 'Containers' bucket when the Docker module landed, so
+    # the sidebar demarcates LXD pages from Docker pages).
     cats = {m['id']: m['category'] for m in app.MODULES}
-    assert all(cats[i] == 'Containers' for i in
+    assert all(cats[i] == 'LXD / Incus' for i in
                ('instances', 'images', 'ctnetworks', 'portforward'))
+    assert cats['docker'] == 'Docker'
     # register_module is idempotent — re-registering must not duplicate.
     before = len(app.MODULES)
     registry.register_module({'id': 'zfs', 'label': 'x', 'category': 'x', 'blueprint': None})

@@ -227,5 +227,5 @@ def network_delete(name):
 
 
 # ─── Module descriptor ─────────────────────────────────────────────────
-MODULE = {'id': 'ctnetworks', 'label': 'Instance Networks', 'category': 'Containers',
+MODULE = {'id': 'ctnetworks', 'label': 'Instance Networks', 'category': 'LXD / Incus',
           'blueprint': bp}

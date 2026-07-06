@@ -61,13 +61,20 @@
         <li><a href="#" data-page="gpu"><span class="icon">&#127918;</span> GPU</a></li>
       </ul>
     </li>
-    <li class="nav-group" data-cat="containers">
-      <div class="nav-cat" onclick="toggleCat('containers')">Containers <span class="caret">&#9662;</span></div>
+    <li class="nav-group" data-cat="lxd">
+      <div class="nav-cat" onclick="toggleCat('lxd')">LXD / Incus <span class="caret">&#9662;</span></div>
       <ul class="nav-sub">
         <li><a href="#" data-page="instances"><span class="icon">&#128230;</span> Instances</a></li>
         <li><a href="#" data-page="images"><span class="icon">&#128190;</span> Images</a></li>
         <li><a href="#" data-page="ctnetworks"><span class="icon">&#128279;</span> Instance Networks</a></li>
         <li><a href="#" data-page="portforward"><span class="icon">&#128228;</span> Port Forward</a></li>
+      </ul>
+    </li>
+    <li class="nav-group" data-cat="docker">
+      <div class="nav-cat" onclick="toggleCat('docker')">Docker <span class="caret">&#9662;</span></div>
+      <ul class="nav-sub">
+        <li><a href="#" data-page="docker"><span class="icon">&#128051;</span> Containers &amp; Images</a></li>
+        <li><a href="#" data-page="compose"><span class="icon">&#128218;</span> Compose Stacks</a></li>
       </ul>
     </li>
     <li class="nav-group" data-cat="system">
@@ -116,5 +123,6 @@
 <script src="/static/js/network.js"></script>
 <script src="/static/js/system.js"></script>
 <script src="/static/js/containers.js"></script>
+<script src="/static/js/docker.js"></script>
 </body>
 </html>
