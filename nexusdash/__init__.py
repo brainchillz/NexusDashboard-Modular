@@ -54,6 +54,13 @@ def create_app():
         app.register_blueprint(mod.MODULE['blueprint'])
         registry.mark_loaded(mod.MODULE['id'])
 
+    # The Prometheus /metrics endpoint is a core blueprint (registered above),
+    # but surfaced as a toggle on the Modules page — OFF by default, since it
+    # can serve host telemetry unauthenticated. Declare its descriptor only
+    # (don't re-register the blueprint).
+    registry.register_module(metrics.MODULE)
+    registry.mark_loaded('metrics')
+
     # Console websockets (xterm.js <-> daemon proxies). Not blueprint-scoped,
     # so they can't ride the runtime gate — each handler re-checks its own
     # module toggle on every connection.

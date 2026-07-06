@@ -115,14 +115,27 @@ def _metrics_families():
 
 @bp.route('/metrics')
 def metrics():
+    # OFF by default: the Prometheus endpoint can serve host telemetry
+    # unauthenticated, so it must be explicitly enabled from the Modules page.
+    # (It's a PUBLIC_ENDPOINT, so require_login's module gate is skipped —
+    # enforce the toggle here.)
+    if 'metrics' in load_disabled_modules():
+        return Response('metrics endpoint disabled\n', status=404, mimetype='text/plain')
     if METRICS_TOKEN:
         tok = request.args.get('token', '')
         auth = request.headers.get('Authorization', '')
         if auth.startswith('Bearer '):
             tok = auth[7:]
-        if tok != METRICS_TOKEN:
+        if not hmac.compare_digest(tok, METRICS_TOKEN):
             return Response('unauthorized\n', status=401, mimetype='text/plain')
     return Response(_render_metrics(_metrics_families()),
                     mimetype='text/plain; version=0.0.4; charset=utf-8')
+
+
+# Registered as a toggleable module (default OFF) so it appears as a tickbox on
+# the Modules page. Its blueprint is a core blueprint already registered by
+# create_app; this descriptor only adds the Modules-page entry + the toggle.
+MODULE = {'id': 'metrics', 'label': 'Prometheus metrics (/metrics)',
+          'category': 'System', 'blueprint': bp, 'default_enabled': False}
 
 

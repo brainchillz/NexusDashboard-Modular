@@ -15,16 +15,19 @@ def test_modules_catalog_ids_are_unique_and_known():
         assert m['id'] and m['label'] and m['category']
 
 
+# Default-off modules (e.g. the Prometheus /metrics endpoint) are reported as
+# disabled until the operator explicitly enables them, so every expectation
+# below folds in app.DEFAULT_OFF.
 def test_load_disabled_missing_file_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(app, 'MODULES_FILE', str(tmp_path / 'nope.json'))
-    assert app.load_disabled_modules() == set()
+    assert app.load_disabled_modules() == set(app.DEFAULT_OFF)
 
 
 def test_load_disabled_reads_known_ids(tmp_path, monkeypatch):
     p = tmp_path / 'modules.json'
     p.write_text(json.dumps({'disabled': ['lvm', 'nfs']}))
     monkeypatch.setattr(app, 'MODULES_FILE', str(p))
-    assert app.load_disabled_modules() == {'lvm', 'nfs'}
+    assert app.load_disabled_modules() == {'lvm', 'nfs'} | set(app.DEFAULT_OFF)
 
 
 def test_load_disabled_ignores_unknown_and_bad_json(tmp_path, monkeypatch):
@@ -32,10 +35,22 @@ def test_load_disabled_ignores_unknown_and_bad_json(tmp_path, monkeypatch):
     # 'bogus' is not a real module → must be dropped; real ids kept.
     p.write_text(json.dumps({'disabled': ['zfs', 'bogus']}))
     monkeypatch.setattr(app, 'MODULES_FILE', str(p))
-    assert app.load_disabled_modules() == {'zfs'}
+    assert app.load_disabled_modules() == {'zfs'} | set(app.DEFAULT_OFF)
 
     p.write_text('{ this is not json')
-    assert app.load_disabled_modules() == set()
+    assert app.load_disabled_modules() == set(app.DEFAULT_OFF)
+
+
+def test_default_off_module_honors_enabled_optin(tmp_path, monkeypatch):
+    # metrics is default-off: disabled with no file, disabled when merely absent,
+    # enabled only when it appears in the positive `enabled` opt-in list.
+    mf = tmp_path / 'modules.json'
+    monkeypatch.setattr(app, 'MODULES_FILE', str(mf))
+    assert 'metrics' in app.load_disabled_modules()                 # no file → off
+    mf.write_text(json.dumps({'disabled': [], 'enabled': ['metrics']}))
+    assert 'metrics' not in app.load_disabled_modules()             # opted in → on
+    mf.write_text(json.dumps({'disabled': [], 'enabled': []}))
+    assert 'metrics' in app.load_disabled_modules()                 # opt-in gone → off
 
 
 def _fake_run_factory(active_map, enabled_state):

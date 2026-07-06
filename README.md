@@ -1,5 +1,4 @@
 # Nexus Dashboard
-<img width="1472" height="1118" alt="Screenshot 2026-07-04 at 10 12 21 PM" src="https://github.com/user-attachments/assets/05c107b5-c003-4fa9-ab37-d5a5d372616c" />
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
@@ -93,11 +92,10 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 279 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 342 tests, no root/hardware needed
 ```
 
 ## Lineage
 
-Replaces two earlier internal projects, now frozen: a single-file
-storage/sharing/AI dashboard (its API kept byte-identical here) and a
-standalone LXD web console.
+Replaces (repos now frozen): `brainchillz/NexusStationDashboard` (single-file
+dashboard, API kept byte-identical here) and `brainchillz/LXD-Console`.

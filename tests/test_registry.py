@@ -19,7 +19,7 @@ def test_descriptors_registered_and_derived():
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
                    'instances', 'images', 'ctnetworks', 'portforward', 'docker',
-                   'compose', 'firewall']
+                   'compose', 'firewall', 'metrics']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category (split
     # from a shared 'Containers' bucket when the Docker module landed, so
@@ -131,3 +131,17 @@ def test_modules_save_never_needs_restart(client, monkeypatch, tmp_path):
     r = client.post('/api/modules', json={'id': 'zfs', 'enabled': True})
     assert r.get_json()['restart_recommended'] is False
     assert json.loads(mf.read_text())['disabled'] == []
+
+
+def test_default_off_module_save_uses_enabled_list(client, monkeypatch, tmp_path):
+    # Enabling a default-off module (metrics) persists a positive `enabled`
+    # opt-in and flips the live disabled set; disabling clears the opt-in.
+    mf = tmp_path / 'modules.json'
+    monkeypatch.setattr(app, 'MODULES_FILE', str(mf))
+    assert 'metrics' in app.load_disabled_modules()          # off by default
+    client.post('/api/modules', json={'id': 'metrics', 'enabled': True})
+    assert json.loads(mf.read_text())['enabled'] == ['metrics']
+    assert 'metrics' not in app.load_disabled_modules()      # now on
+    client.post('/api/modules', json={'id': 'metrics', 'enabled': False})
+    assert json.loads(mf.read_text())['enabled'] == []
+    assert 'metrics' in app.load_disabled_modules()          # off again

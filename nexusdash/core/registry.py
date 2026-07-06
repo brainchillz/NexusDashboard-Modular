@@ -46,6 +46,7 @@ MODULES_FILE = os.environ.get('DASHBOARD_MODULES_FILE', os.path.join(APP_DIR, 'm
 # place, so `app.MODULES` / `app.MODULE_IDS` behave exactly as before.
 MODULES = []            # [{'id','label','category'}] in nav order
 MODULE_IDS = set()
+DEFAULT_OFF = set()     # ids disabled unless the operator explicitly enables them
 _DESCRIPTORS = {}       # id -> full descriptor
 _BP_TO_MODULE = {}      # blueprint name -> module id
 _LOADED = set()         # module ids whose blueprint is actually registered
@@ -53,13 +54,18 @@ _LOADED = set()         # module ids whose blueprint is actually registered
 
 def register_module(desc):
     """Declare a feature module (idempotent). Does NOT attach the blueprint —
-    create_app registers it separately (always, even when disabled)."""
+    create_app registers it separately (always, even when disabled). A
+    descriptor with `default_enabled=False` is OFF until explicitly enabled
+    from the Modules page (used for the Prometheus endpoint, which can serve
+    host telemetry unauthenticated — opt-in, not default-on)."""
     mid = desc['id']
     if mid in _DESCRIPTORS:
         return
     _DESCRIPTORS[mid] = desc
     MODULES.append({'id': mid, 'label': desc['label'], 'category': desc['category']})
     MODULE_IDS.add(mid)
+    if not desc.get('default_enabled', True):
+        DEFAULT_OFF.add(mid)
     blueprint = desc.get('blueprint')
     if blueprint is not None:
         _BP_TO_MODULE[blueprint.name] = mid
@@ -97,14 +103,25 @@ def cli_commands():
     return cmds
 
 
-def load_disabled_modules():
+def _load_modules_file():
     try:
         with open(MODULES_FILE) as f:
-            data = json.load(f)
+            return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+        return {}
+
+
+def load_disabled_modules():
+    data = _load_modules_file()
     # Keep only ids we still recognize (a removed module shouldn't linger).
-    return {m for m in data.get('disabled', []) if m in MODULE_IDS}
+    disabled = {m for m in data.get('disabled', []) if m in MODULE_IDS}
+    explicitly_enabled = set(data.get('enabled', []))
+    # Default-off modules (e.g. the Prometheus endpoint) are disabled unless the
+    # operator has explicitly enabled them from the Modules page.
+    for mid in DEFAULT_OFF:
+        if mid in MODULE_IDS and mid not in explicitly_enabled:
+            disabled.add(mid)
+    return disabled
 
 
 def _enabled_module_ids():
@@ -133,7 +150,9 @@ def modules_save():
     blueprints are always registered). restart_recommended is kept in the
     response for callers built against the old boot-skip behavior."""
     data = request.get_json() or {}
-    disabled = load_disabled_modules()
+    stored = _load_modules_file()
+    disabled = {m for m in stored.get('disabled', []) if m in MODULE_IDS}
+    enabled_set = {m for m in stored.get('enabled', []) if m in MODULE_IDS}
     if 'id' in data:
         updates = {data.get('id'): bool(data.get('enabled'))}
     elif isinstance(data.get('modules'), dict):
@@ -143,9 +162,14 @@ def modules_save():
     for mid, enabled in updates.items():
         if mid not in MODULE_IDS:
             continue
-        if enabled:
+        if mid in DEFAULT_OFF:
+            # Default-off: track the positive `enabled` opt-in, not `disabled`.
+            (enabled_set.add if enabled else enabled_set.discard)(mid)
+            disabled.discard(mid)
+        elif enabled:
             disabled.discard(mid)
         else:
             disabled.add(mid)
-    write_json_atomic(MODULES_FILE, {'disabled': sorted(disabled)}, 0o644)
+    write_json_atomic(MODULES_FILE,
+                      {'disabled': sorted(disabled), 'enabled': sorted(enabled_set)}, 0o644)
     return jsonify({'success': True, 'restart_recommended': False})
