@@ -288,12 +288,14 @@ async function page_firewall() {
     ? '<span class="status-badge green">active</span>'
     : '<span class="status-badge red">inactive</span>';
   const d = f.defaults || {};
-  const rows = (f.rules || []).map(r => `<tr>
+  fwRulesCache = f.rules || [];
+  const rows = fwRulesCache.map(r => `<tr>
       <td><code>${escapeHtml(r.to)}</code>${r.v6 ? ' <span class="help">(v6)</span>' : ''}</td>
       <td><span class="status-badge ${(r.action === 'ALLOW' || r.action === 'LIMIT') ? 'green' : 'red'}">${escapeHtml(r.action)}</span></td>
       <td>${escapeHtml(r.from || 'Anywhere')}</td>
       <td class="help">${escapeHtml(r.comment || '')}</td>
-      <td><button class="btn btn-sm btn-outline"
+      <td>${/^\d+(\/(tcp|udp))?$/.test(r.to) ? `<button class="btn btn-sm btn-outline"
+            onclick="fwEditRule(${r.number})">Edit</button> ` : ''}<button class="btn btn-sm btn-outline"
             onclick="fwDeleteRule(${r.number}, '${jsArg(r.to)}', '${jsArg(r.action)}', '${jsArg(r.from)}')">Delete</button></td>
     </tr>`).join('');
   const toggleBtn = f.active
@@ -302,7 +304,9 @@ async function page_firewall() {
   $('page-content').innerHTML = `
     <h2>Firewall ${badge}</h2>
     <p class="help">Host firewall (ufw) — inbound traffic control. Port <code>${f.dashboard_port}</code> serves
-      this dashboard and is protected: it is allowed automatically and cannot be blocked from this page.</p>
+      this dashboard: it is allowed automatically when the firewall is enabled (unless a rule for it already
+      exists), and changes that could cut off this page ask for confirmation first — you can still scope or
+      remove its rule deliberately.</p>
     <div class="toolbar">${toggleBtn}</div>
     <h3 style="margin-top:24px">Default policy</h3>
     <div style="display:flex;gap:8px;align-items:end;max-width:560px">
@@ -329,17 +333,23 @@ async function page_firewall() {
 
 function fwEnableModal() {
   openModal('Enable Firewall', `
-    <p>Enabling turns on the default policy immediately. To prevent lockouts, an allow rule for the
-      dashboard port is added automatically.</p>
+    <p>Enabling turns on the default policy immediately.</p>
+    <div class="form-group"><label><input type="checkbox" id="fw-allow-dashboard" checked>
+      Allow the dashboard port — recommended; skipped automatically if a rule for it already exists
+      (a scoped rule is never widened)</label></div>
     <div class="form-group"><label><input type="checkbox" id="fw-allow-ssh" checked>
       Also allow SSH (port 22) — recommended if you manage this machine over SSH</label></div>
     <button class="btn" onclick="fwEnable()">Enable</button>`);
 }
 async function fwEnable() {
   const allow_ssh = $('fw-allow-ssh').checked;
+  const allow_dashboard = $('fw-allow-dashboard').checked;
+  if (!allow_dashboard && !confirm('Enable WITHOUT ensuring the dashboard port is allowed? '
+      + 'If the default policy is deny and no rule covers it, you will lose this page the moment '
+      + 'the firewall comes up.')) return;
   closeModal();
   try {
-    const r = await API.post('/api/firewall/enable', { allow_ssh });
+    const r = await API.post('/api/firewall/enable', { allow_ssh, allow_dashboard });
     if (!r.success) { alert(r.error || 'Failed'); return; }
   } catch (e) { alert(e.message); }
   page_firewall();
@@ -361,46 +371,77 @@ async function fwSetPolicy() {
   page_firewall();
 }
 
-function fwRuleModal() {
-  openModal('Add Firewall Rule', `
+let fwRulesCache = [];
+let fwEditing = null;   // parsed rule row when the modal is editing, else null
+
+function fwRuleModal(rule) {
+  fwEditing = rule || null;
+  const m = rule ? rule.to.match(/^(\d+)(?:\/(tcp|udp))?$/) : null;
+  const cur = rule ? {
+    action: rule.action.toLowerCase(),
+    port: m ? m[1] : '',
+    proto: m && m[2] ? m[2] : 'any',
+    source: rule.from === 'Anywhere' ? '' : rule.from,
+    comment: rule.comment || '',
+  } : { action: 'allow', port: '', proto: 'any', source: '', comment: '' };
+  const sel = v => v === cur.proto ? ' selected' : '';
+  const act = v => v === cur.action ? ' selected' : '';
+  openModal(rule ? `Edit Firewall Rule [${rule.number}]` : 'Add Firewall Rule', `
+    ${rule ? '<p class="help">ufw has no in-place edit: saving replaces the rule, and the new one is appended at the end of the list.</p>' : ''}
     <div class="form-group"><label>Action</label>
       <select id="fw-action" class="form-control">
-        <option value="allow">Allow</option>
-        <option value="deny">Deny (drop silently)</option>
-        <option value="reject">Reject (refuse + notify sender)</option>
-        <option value="limit">Limit (allow, rate-limited — good for SSH)</option>
+        <option value="allow"${act('allow')}>Allow</option>
+        <option value="deny"${act('deny')}>Deny (drop silently)</option>
+        <option value="reject"${act('reject')}>Reject (refuse + notify sender)</option>
+        <option value="limit"${act('limit')}>Limit (allow, rate-limited — good for SSH)</option>
       </select></div>
-    <div class="form-group"><label>Port</label><input id="fw-port" class="form-control" placeholder="e.g. 445"></div>
+    <div class="form-group"><label>Port</label><input id="fw-port" class="form-control" placeholder="e.g. 445" value="${escapeHtml(cur.port)}"></div>
     <div class="form-group"><label>Protocol</label>
       <select id="fw-proto" class="form-control">
-        <option value="any">TCP + UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option>
+        <option value="any"${sel('any')}>TCP + UDP</option><option value="tcp"${sel('tcp')}>TCP</option><option value="udp"${sel('udp')}>UDP</option>
       </select></div>
     <div class="form-group"><label>From (optional — IP or subnet; empty = anywhere)</label>
-      <input id="fw-source" class="form-control" placeholder="192.168.1.0/24"></div>
+      <input id="fw-source" class="form-control" placeholder="192.168.1.0/24" value="${escapeHtml(cur.source)}"></div>
     <div class="form-group"><label>Comment (optional)</label>
-      <input id="fw-comment" class="form-control" placeholder="what this rule is for"></div>
-    <button class="btn" onclick="fwAddRule()">Add Rule</button>`);
+      <input id="fw-comment" class="form-control" placeholder="what this rule is for" value="${escapeHtml(cur.comment)}"></div>
+    <button class="btn" onclick="fwSubmitRule()">${rule ? 'Save Changes' : 'Add Rule'}</button>`);
 }
-async function fwAddRule() {
-  const body = {
+function fwEditRule(number) {
+  const rule = fwRulesCache.find(r => r.number === number);
+  if (rule) fwRuleModal(rule);
+}
+async function fwSubmitRule(confirmed) {
+  const rule = {
     action: $('fw-action').value,
     port: parseInt($('fw-port').value, 10),
     proto: $('fw-proto').value,
     source: $('fw-source').value.trim(),
     comment: $('fw-comment').value.trim(),
   };
-  if (!body.port) { alert('Port required'); return; }
+  if (!rule.port) { alert('Port required'); return; }
+  const body = fwEditing
+    ? { number: fwEditing.number, rule,
+        expect: { to: fwEditing.to, action: fwEditing.action, from: fwEditing.from } }
+    : rule;
+  if (confirmed) body.confirm = true;
   try {
-    const r = await API.post('/api/firewall/rule', body);
+    const r = await API.post(fwEditing ? '/api/firewall/rule/update' : '/api/firewall/rule', body);
+    if (r.needs_confirm) { if (confirm(r.error)) return fwSubmitRule(true); return; }
     if (!r.success) { alert(r.error || 'Failed'); return; }
     closeModal();
   } catch (e) { alert(e.message); return; }
   page_firewall();
 }
-async function fwDeleteRule(number, to, action, from) {
-  if (!confirm(`Delete rule [${number}] ${action} ${to} from ${from || 'Anywhere'}?`)) return;
+async function fwDeleteRule(number, to, action, from, confirmed) {
+  if (!confirmed && !confirm(`Delete rule [${number}] ${action} ${to} from ${from || 'Anywhere'}?`)) return;
   try {
-    const r = await API.post('/api/firewall/rule/delete', { number, expect: { to, action, from } });
+    const body = { number, expect: { to, action, from } };
+    if (confirmed) body.confirm = true;
+    const r = await API.post('/api/firewall/rule/delete', body);
+    if (r.needs_confirm) {
+      if (confirm(r.error)) return fwDeleteRule(number, to, action, from, true);
+      return;
+    }
     if (!r.success) { alert(r.error || 'Failed'); return; }
   } catch (e) { alert(e.message); }
   page_firewall();

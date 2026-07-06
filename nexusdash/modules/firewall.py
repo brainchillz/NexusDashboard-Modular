@@ -5,9 +5,12 @@ switch, and every node that wants it runs ufw. On a host without ufw (or
 before the sudoers rule lands) the page reports available/status_known false
 and everything degrades gracefully — same contract as Containers without LXD.
 
-Lockout guard: the port serving this UI can never be blocked from here — a
-deny rule on it is refused, its allow rule can't be deleted under a deny
-default, and enabling the firewall (or defaulting to deny) auto-allows it.
+Lockout guard: changes that could cut off the port serving this UI (a deny
+rule on it, or removing/replacing its last allow under a deny default) are
+never refused outright — they come back needs_confirm with a warning and go
+through when the caller re-submits with confirm. Enabling the firewall (or
+defaulting to deny) auto-allows the port only when NO allow for it exists,
+so a deliberately scoped or removed rule stays as the operator left it.
 """
 import re
 import shutil
@@ -76,6 +79,30 @@ def _dashboard_rule_match(to):
     return to in ('%d/tcp' % DASHBOARD_PORT, str(DASHBOARD_PORT))
 
 
+def _covers_dashboard(rule):
+    """Is this parsed rule an allow (or rate-limited allow) of the dashboard
+    port?"""
+    return rule['action'] in ('ALLOW', 'LIMIT') and _dashboard_rule_match(rule['to'])
+
+
+def _delete_would_cut_dashboard(st, rule):
+    """Would removing `rule` leave the dashboard port unreachable? True when
+    incoming defaults to deny/reject and no OTHER allow of the same address
+    family still covers the port (a v6 allow does not keep v4 clients in)."""
+    if st['defaults'].get('incoming') not in ('deny', 'reject'):
+        return False
+    if not _covers_dashboard(rule):
+        return False
+    return not any(r['number'] != rule['number'] and r['v6'] == rule['v6']
+                   and _covers_dashboard(r) for r in st['rules'])
+
+
+def _needs_confirm(warning):
+    """success:false + needs_confirm — the UI shows the warning and re-submits
+    with confirm:true. HTTP 200 so plain callers still surface the message."""
+    return jsonify({'success': False, 'needs_confirm': True, 'error': warning})
+
+
 def _dashboard_port_has_allow():
     """Is there ANY added allow rule covering the dashboard port? Checked via
     `ufw show added` (works while inactive too). Source-restricted allows
@@ -111,7 +138,8 @@ def firewall_enable():
     data = request.get_json() or {}
     if not shutil.which('ufw'):
         return err('ufw is not installed on this host')
-    _ensure_dashboard_allowed()
+    if data.get('allow_dashboard', True):
+        _ensure_dashboard_allowed()
     if data.get('allow_ssh', True):
         run(['ufw', 'allow', '22/tcp', 'comment', 'SSH'])
     out, errout, rc = run(['ufw', '--force', 'enable'])
@@ -154,10 +182,32 @@ def _validate_rule(action, port, proto, source, comment):
         return 'Source must be an IP address or CIDR subnet'
     if comment and not RE_FW_COMMENT.match(comment):
         return 'Comment: letters, numbers, spaces and _.:- only (max 64)'
-    if action in ('deny', 'reject') and port == DASHBOARD_PORT and proto in ('any', 'tcp'):
-        return ('Refusing to block port %d — it serves this dashboard'
-                % DASHBOARD_PORT)
     return None
+
+
+def _blocks_dashboard(action, port, proto):
+    """Would this rule block the TCP port serving this UI? Not refused —
+    routes turn it into a needs_confirm warning."""
+    return (action in ('deny', 'reject') and port == DASHBOARD_PORT
+            and proto in ('any', 'tcp'))
+
+
+def _keeps_dashboard_open(action, port, proto, source):
+    """Is this rule an unconditional allow of the dashboard port? (A
+    source-scoped allow still risks cutting off a client outside the range,
+    so it does not count here.)"""
+    return (action in ('allow', 'limit') and port == DASHBOARD_PORT
+            and proto in ('any', 'tcp') and not source)
+
+
+def _rule_args(action, port, proto, source, comment):
+    args = ['ufw', action]
+    if proto != 'any':
+        args += ['proto', proto]
+    args += ['from', source or 'any', 'to', 'any', 'port', str(port)]
+    if comment:
+        args += ['comment', comment]
+    return args
 
 
 @bp.route('/api/firewall/rule', methods=['POST'])
@@ -174,13 +224,12 @@ def firewall_rule_add():
     bad = _validate_rule(action, port, proto, source, comment)
     if bad:
         return err(bad)
-    args = ['ufw', action]
-    if proto != 'any':
-        args += ['proto', proto]
-    args += ['from', source or 'any', 'to', 'any', 'port', str(port)]
-    if comment:
-        args += ['comment', comment]
-    out, errout, rc = run(args)
+    if _blocks_dashboard(action, port, proto) and not data.get('confirm'):
+        return _needs_confirm(
+            'Port %d serves this dashboard — a %s rule on it can cut you off '
+            '(this connection comes from %s). Add it anyway?'
+            % (DASHBOARD_PORT, action, request.remote_addr))
+    out, errout, rc = run(_rule_args(action, port, proto, source, comment))
     if rc != 0:
         return err((errout or out).strip() or 'ufw failed')
     return jsonify({'success': True, 'detail': out.strip()})
@@ -206,15 +255,92 @@ def firewall_rule_delete():
     for k in ('to', 'action', 'from'):
         if k in expect and expect[k] != cur[k]:
             return err('Rules changed since the page loaded — refresh and retry', 409)
-    if (cur['action'] == 'ALLOW' and _dashboard_rule_match(cur['to'])
-            and st['defaults'].get('incoming') in ('deny', 'reject')):
-        return err('Refusing to delete the allow rule for port %d — it serves '
-                   'this dashboard and incoming traffic is denied by default'
-                   % DASHBOARD_PORT)
+    if _delete_would_cut_dashboard(st, cur) and not data.get('confirm'):
+        return _needs_confirm(
+            'This is the last%s allow rule for port %d, which serves this '
+            'dashboard — with incoming traffic denied by default, deleting it '
+            'can lock you out of this page (this connection comes from %s). '
+            'Delete it anyway?'
+            % (' IPv6' if cur['v6'] else '', DASHBOARD_PORT, request.remote_addr))
     out, errout, rc = run(['ufw', '--force', 'delete', str(number)])
     if rc != 0:
         return err((errout or out).strip() or 'ufw delete failed')
     return jsonify({'success': True})
+
+
+RE_TO_PORT = re.compile(r'^(\d+)(?:/(tcp|udp))?\Z')
+
+
+def _readd_parsed(cur):
+    """Best-effort rollback: re-add a rule from its parsed table row (used
+    when an edit's re-add step fails after the delete already happened)."""
+    m = RE_TO_PORT.match(cur['to'])
+    if not m:
+        return False
+    src = '' if cur['from'].startswith('Anywhere') else cur['from']
+    _, _, rc = run(_rule_args(cur['action'].lower(), int(m.group(1)),
+                              m.group(2) or 'any', src, cur['comment']))
+    return rc == 0
+
+
+@bp.route('/api/firewall/rule/update', methods=['POST'])
+def firewall_rule_update():
+    """Edit a rule: verified numbered delete + re-add. ufw has no in-place
+    edit, and `insert` positions don't map cleanly across the v4/v6 sections,
+    so the edited rule moves to the end of the list."""
+    data = request.get_json() or {}
+    try:
+        number = int(data.get('number'))
+    except (TypeError, ValueError):
+        return err('Rule number required')
+    rule = data.get('rule') or {}
+    action = rule.get('action', 'allow')
+    proto = rule.get('proto', 'any')
+    source = (rule.get('source') or '').strip()
+    comment = (rule.get('comment') or '').strip()
+    try:
+        port = int(rule.get('port'))
+    except (TypeError, ValueError):
+        return err('Port must be a number from 1 to 65535')
+    bad = _validate_rule(action, port, proto, source, comment)
+    if bad:
+        return err(bad)
+    expect = data.get('expect') or {}
+    st = _ufw_status()
+    if not st['status_known']:
+        return err('Could not read current rules')
+    cur = next((r for r in st['rules'] if r['number'] == number), None)
+    if cur is None:
+        return err('Rule %d not found — refresh and retry' % number, 409)
+    for k in ('to', 'action', 'from'):
+        if k in expect and expect[k] != cur[k]:
+            return err('Rules changed since the page loaded — refresh and retry', 409)
+    if not data.get('confirm'):
+        if _blocks_dashboard(action, port, proto):
+            return _needs_confirm(
+                'Port %d serves this dashboard — a %s rule on it can cut you '
+                'off (this connection comes from %s). Apply it anyway?'
+                % (DASHBOARD_PORT, action, request.remote_addr))
+        if (_delete_would_cut_dashboard(st, cur)
+                and not _keeps_dashboard_open(action, port, proto, source)):
+            return _needs_confirm(
+                'This is the last%s allow rule for port %d, which serves this '
+                'dashboard. If the new rule does not match your connection '
+                '(it comes from %s), you can lock yourself out of this page. '
+                'Apply it anyway?'
+                % (' IPv6' if cur['v6'] else '', DASHBOARD_PORT,
+                   request.remote_addr))
+    out, errout, rc = run(['ufw', '--force', 'delete', str(number)])
+    if rc != 0:
+        return err((errout or out).strip() or 'ufw delete failed')
+    out, errout, rc = run(_rule_args(action, port, proto, source, comment))
+    if rc != 0:
+        restored = _readd_parsed(cur)
+        return err('Applying the new rule failed: %s — the old rule was %s'
+                   % ((errout or out).strip() or 'ufw failed',
+                      're-added' if restored else 'REMOVED and could not be '
+                      're-added; check the rules list'))
+    return jsonify({'success': True, 'detail': out.strip()})
 
 
 UFW_CONF = '/etc/ufw/ufw.conf'

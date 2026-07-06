@@ -111,15 +111,17 @@ def test_validate_rule_rejects_bad_input(action, port, proto, source, comment):
     assert app._validate_rule(action, port, proto, source, comment) is not None
 
 
-def test_guard_refuses_blocking_dashboard_port():
+def test_blocks_dashboard_detection():
     port = app.DASHBOARD_PORT
     for action in ('deny', 'reject'):
         for proto in ('any', 'tcp'):
-            assert 'dashboard' in app._validate_rule(action, port, proto, '', '')
-    # UDP on the same number is unrelated to the HTTPS UI - allowed.
-    assert app._validate_rule('deny', port, 'udp', '', '') is None
-    # And allowing the dashboard port is of course fine.
-    assert app._validate_rule('allow', port, 'tcp', '', '') is None
+            assert app._blocks_dashboard(action, port, proto) is True
+    # UDP on the same number is unrelated to the HTTPS UI.
+    assert app._blocks_dashboard('deny', port, 'udp') is False
+    assert app._blocks_dashboard('allow', port, 'tcp') is False
+    assert app._blocks_dashboard('deny', port + 1, 'tcp') is False
+    # Validation itself no longer refuses it — routes warn instead.
+    assert app._validate_rule('deny', port, 'tcp', '', '') is None
 
 
 # ─── Routes (through the facade test client) ─────────────────────────────
@@ -151,14 +153,21 @@ def test_rule_add_any_proto_omits_proto_args(client, monkeypatch):
     assert calls == [['ufw', 'deny', 'from', 'any', 'to', 'any', 'port', '23']]
 
 
-def test_rule_add_refuses_dashboard_port(client, monkeypatch):
+def test_rule_add_blocking_dashboard_needs_confirm(client, monkeypatch):
     fake, calls = _fake_run({})
     monkeypatch.setattr(app, 'run', fake)
-    r = client.post('/api/firewall/rule',
-                    json={'action': 'deny', 'port': app.DASHBOARD_PORT, 'proto': 'tcp'})
-    assert r.status_code == 400
-    assert 'dashboard' in r.get_json()['error']
-    assert calls == []                      # refused before ufw ever runs
+    body = {'action': 'deny', 'port': app.DASHBOARD_PORT, 'proto': 'tcp'}
+    r = client.post('/api/firewall/rule', json=body)
+    j = r.get_json()
+    assert r.status_code == 200 and not j['success'] and j['needs_confirm']
+    assert 'dashboard' in j['error']
+    assert calls == []                      # nothing ran without confirmation
+    # Re-submitted with confirm -> executes.
+    r = client.post('/api/firewall/rule', json=dict(body, confirm=True))
+    assert r.get_json()['success']
+    assert calls == [['ufw', 'deny', 'proto', 'tcp',
+                      'from', 'any', 'to', 'any',
+                      'port', str(app.DASHBOARD_PORT)]]
 
 
 def test_enable_allows_dashboard_port_first(client, monkeypatch):
@@ -258,23 +267,149 @@ def test_delete_409_when_rules_shifted(client, monkeypatch):
     assert r.status_code == 409
 
 
-def test_delete_protects_dashboard_allow_under_default_deny(client, monkeypatch):
+def test_delete_last_dashboard_allow_needs_confirm(client, monkeypatch):
     st = {'available': True, 'status_known': True, 'active': True,
           'defaults': {'incoming': 'deny', 'outgoing': 'allow'},
           'rules': app._parse_ufw_numbered(UFW_NUMBERED)}
     monkeypatch.setattr(app, '_ufw_status', lambda: st)
     fake, calls = _fake_run({})
     monkeypatch.setattr(app, 'run', fake)
-    r = client.post('/api/firewall/rule/delete', json={
-        'number': 1, 'expect': {'to': '8443/tcp', 'action': 'ALLOW', 'from': 'Anywhere'}})
-    assert r.status_code == 400
-    assert 'dashboard' in r.get_json()['error']
+    body = {'number': 1,
+            'expect': {'to': '8443/tcp', 'action': 'ALLOW', 'from': 'Anywhere'}}
+    # The v6 twin (rule 4) does not keep v4 clients in -> this IS the last
+    # v4 allow, so it warns instead of deleting.
+    r = client.post('/api/firewall/rule/delete', json=body)
+    j = r.get_json()
+    assert r.status_code == 200 and not j['success'] and j['needs_confirm']
+    assert 'dashboard' in j['error']
     assert calls == []
-    # Under default ALLOW incoming, removing it is harmless and permitted.
+    # Confirmed -> deletes. Warn, don't forbid: the operator decides.
+    r = client.post('/api/firewall/rule/delete', json=dict(body, confirm=True))
+    assert r.get_json()['success']
+    assert calls == [['ufw', '--force', 'delete', '1']]
+    # Under default ALLOW incoming, removing it is harmless — no nag.
+    calls.clear()
     st['defaults'] = {'incoming': 'allow', 'outgoing': 'allow'}
+    r = client.post('/api/firewall/rule/delete', json=body)
+    assert r.get_json()['success'] and calls == [['ufw', '--force', 'delete', '1']]
+
+
+def test_delete_dashboard_allow_quiet_when_scoped_allow_remains(client, monkeypatch):
+    """The scope-down flow: once a source-restricted allow for the dashboard
+    port exists, deleting the broad Anywhere rule needs no confirmation."""
+    numbered = UFW_NUMBERED + \
+        '[ 5] 8443/tcp                   ALLOW IN    203.0.113.99               # lab only\n'
+    st = {'available': True, 'status_known': True, 'active': True,
+          'defaults': {'incoming': 'deny', 'outgoing': 'allow'},
+          'rules': app._parse_ufw_numbered(numbered)}
+    monkeypatch.setattr(app, '_ufw_status', lambda: st)
+    fake, calls = _fake_run({})
+    monkeypatch.setattr(app, 'run', fake)
     r = client.post('/api/firewall/rule/delete', json={
         'number': 1, 'expect': {'to': '8443/tcp', 'action': 'ALLOW', 'from': 'Anywhere'}})
-    assert r.status_code == 200
+    assert r.get_json()['success']
+    assert calls == [['ufw', '--force', 'delete', '1']]
+
+
+def test_enable_can_skip_dashboard_allow(client, monkeypatch):
+    fake, calls = _fake_run({})
+    monkeypatch.setattr(app, 'run', fake)
+    monkeypatch.setattr(app.shutil, 'which', lambda n: '/usr/sbin/ufw')
+    r = client.post('/api/firewall/enable',
+                    json={'allow_ssh': False, 'allow_dashboard': False})
+    assert r.get_json()['success']
+    assert calls == [['ufw', '--force', 'enable']]
+
+
+# ─── Rule edit (update = verified delete + re-add) ───────────────────────
+
+def test_update_replaces_rule(client, monkeypatch):
+    st = {'available': True, 'status_known': True, 'active': True,
+          'defaults': {'incoming': 'deny', 'outgoing': 'allow'},
+          'rules': app._parse_ufw_numbered(UFW_NUMBERED)}
+    monkeypatch.setattr(app, '_ufw_status', lambda: st)
+    fake, calls = _fake_run({})
+    monkeypatch.setattr(app, 'run', fake)
+    r = client.post('/api/firewall/rule/update', json={
+        'number': 3, 'expect': {'to': '445', 'action': 'DENY', 'from': '10.0.0.5'},
+        'rule': {'action': 'deny', 'port': 445, 'proto': 'tcp',
+                 'source': '10.0.0.0/24', 'comment': 'smb block'}})
+    assert r.get_json()['success']
+    assert calls == [
+        ['ufw', '--force', 'delete', '3'],
+        ['ufw', 'deny', 'proto', 'tcp', 'from', '10.0.0.0/24',
+         'to', 'any', 'port', '445', 'comment', 'smb block'],
+    ]
+
+
+def test_update_verifies_expect_and_validates(client, monkeypatch):
+    st = {'available': True, 'status_known': True, 'active': True,
+          'defaults': {}, 'rules': app._parse_ufw_numbered(UFW_NUMBERED)}
+    monkeypatch.setattr(app, '_ufw_status', lambda: st)
+    fake, calls = _fake_run({})
+    monkeypatch.setattr(app, 'run', fake)
+    # Stale expect -> 409, nothing ran.
+    r = client.post('/api/firewall/rule/update', json={
+        'number': 2, 'expect': {'to': '445', 'action': 'DENY', 'from': '10.0.0.5'},
+        'rule': {'action': 'allow', 'port': 22}})
+    assert r.status_code == 409 and calls == []
+    # Bad replacement rule -> 400 before any ufw call.
+    r = client.post('/api/firewall/rule/update', json={
+        'number': 3, 'expect': {}, 'rule': {'action': 'allow', 'port': 22,
+                                            'source': 'not a subnet'}})
+    assert r.status_code == 400 and calls == []
+
+
+def test_update_scoping_dashboard_rule_needs_confirm(client, monkeypatch):
+    """The internet-facing-node case: narrowing the last broad dashboard allow to an
+    explicit source warns once (you could pick the wrong source), then goes
+    through with confirm — it is never refused."""
+    st = {'available': True, 'status_known': True, 'active': True,
+          'defaults': {'incoming': 'deny', 'outgoing': 'allow'},
+          'rules': app._parse_ufw_numbered(UFW_NUMBERED)}
+    monkeypatch.setattr(app, '_ufw_status', lambda: st)
+    fake, calls = _fake_run({})
+    monkeypatch.setattr(app, 'run', fake)
+    body = {'number': 1,
+            'expect': {'to': '8443/tcp', 'action': 'ALLOW', 'from': 'Anywhere'},
+            'rule': {'action': 'allow', 'port': app.DASHBOARD_PORT,
+                     'proto': 'tcp', 'source': '203.0.113.99',
+                     'comment': 'Nexus Dashboard lab only'}}
+    r = client.post('/api/firewall/rule/update', json=body)
+    j = r.get_json()
+    assert r.status_code == 200 and not j['success'] and j['needs_confirm']
+    assert calls == []
+    r = client.post('/api/firewall/rule/update', json=dict(body, confirm=True))
+    assert r.get_json()['success']
+    assert calls == [
+        ['ufw', '--force', 'delete', '1'],
+        ['ufw', 'allow', 'proto', 'tcp', 'from', '203.0.113.99',
+         'to', 'any', 'port', str(app.DASHBOARD_PORT),
+         'comment', 'Nexus Dashboard lab only'],
+    ]
+    # An edit that keeps the unconditional allow (e.g. comment change) is quiet.
+    calls.clear()
+    body['rule'] = {'action': 'allow', 'port': app.DASHBOARD_PORT,
+                    'proto': 'tcp', 'source': '', 'comment': 'renamed'}
+    r = client.post('/api/firewall/rule/update', json=body)
+    assert r.get_json()['success'] and calls[0] == ['ufw', '--force', 'delete', '1']
+
+
+def test_update_rolls_back_when_readd_fails(client, monkeypatch):
+    st = {'available': True, 'status_known': True, 'active': True,
+          'defaults': {}, 'rules': app._parse_ufw_numbered(UFW_NUMBERED)}
+    monkeypatch.setattr(app, '_ufw_status', lambda: st)
+    # Delete succeeds; the new 'reject' add fails; the rollback re-add (a
+    # 'deny', rebuilt from the parsed row) works.
+    fake, calls = _fake_run({('ufw', 'reject'): ('', 'boom', 1)})
+    monkeypatch.setattr(app, 'run', fake)
+    r = client.post('/api/firewall/rule/update', json={
+        'number': 3, 'expect': {'to': '445', 'action': 'DENY', 'from': '10.0.0.5'},
+        'rule': {'action': 'reject', 'port': 446}})
+    assert r.status_code == 400
+    assert 're-added' in r.get_json()['error']
+    assert calls[-1] == ['ufw', 'deny', 'from', '10.0.0.5',
+                         'to', 'any', 'port', '445']
 
 
 # ─── Alerts hook & registration ──────────────────────────────────────────
