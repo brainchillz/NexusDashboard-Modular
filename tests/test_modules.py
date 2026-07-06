@@ -68,6 +68,8 @@ def test_alerts_suppressed_for_boot_disabled_unit(monkeypatch):
     monkeypatch.setattr(app, 'run', _fake_run_factory({}, 'disabled'))
     monkeypatch.setattr(app, 'load_disabled_modules', lambda: set())
     monkeypatch.setattr(app, '_smart_health_ok', lambda: True)
+    # Keep the firewall hook out of it (ufw presence varies by test host).
+    monkeypatch.setitem(app._DESCRIPTORS['firewall'], 'alerts', lambda: [])
     assert app._compute_alerts() == []
 
 

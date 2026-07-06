@@ -103,6 +103,9 @@ dashboard ALL=(ALL) NOPASSWD: /bin/ip
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/dpkg-query
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/smartctl
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/smartctl
+# Host firewall (Firewall module). The app refuses rules that would block its
+# own port; ufw only ever gets fixed keywords + validated port/CIDR arguments.
+dashboard ALL=(ALL) NOPASSWD: /usr/sbin/ufw
 # Disk wipe (blank a free/stale disk: stop stale md, zero superblocks, clear
 # signatures + partition table). Eligibility is enforced in app.py.
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/mdadm, /sbin/mdadm

@@ -44,6 +44,7 @@ from nexusdash.modules import network as _m_network
 from nexusdash.modules import schedules as _m_schedules
 from nexusdash.modules import lvm as _m_lvm
 from nexusdash.modules import mdraid as _m_mdraid
+from nexusdash.modules import firewall as _m_firewall
 from nexusdash.modules.containers import client as _m_ct_client
 from nexusdash.modules.containers import instances as _m_ct_instances
 from nexusdash.modules.containers import images as _m_ct_images
@@ -62,7 +63,7 @@ _FACADE_MODULES = [_m_config, _m_runcmd, _m_validators, _m_services, _m_registry
                    _m_auth, _m_audit, _m_tls, _m_svc_actions,
                    _m_disks, _m_gpu, _m_logs, _m_zfs, _m_iscsi, _m_nfs, _m_smb,
                    _m_minidlna, _m_replication, _m_maintenance, _m_llama,
-                   _m_network, _m_schedules, _m_lvm, _m_mdraid,
+                   _m_network, _m_schedules, _m_lvm, _m_mdraid, _m_firewall,
                    _m_ct_client, _m_ct_instances, _m_ct_images, _m_ct_networks,
                    _m_ct_portforward, _m_ct_console,
                    _m_summary, _m_history, _m_metrics, _m_tasks, _m_alerts,

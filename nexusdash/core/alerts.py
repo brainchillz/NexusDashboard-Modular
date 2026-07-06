@@ -136,6 +136,10 @@ def cli_alerts_tick():
                 _notify(cfg, 'RESOLVED', msg)
     cfg['state'] = current  # always refresh so enable/disable stays clean
     save_notifications(cfg)
+    # Explicit exit code: app.py treats a None from dispatch() as "no command
+    # matched" and falls through to starting the SERVER — a missing return here
+    # had every alerts-tick since the 2.0.0 cutover die on the bound port.
+    return 0
 
 
 def _validate_notifications(data):

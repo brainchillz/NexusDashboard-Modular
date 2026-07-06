@@ -266,3 +266,142 @@ function tokenCreate() {
     <button class="btn" onclick="tokenDoCreate()">Create Token</button>`);
 }
 
+
+// ─── Firewall (ufw) ─────────────────────────────────────
+async function page_firewall() {
+  if (currentRole !== 'admin') return adminOnlyPage('Firewall');
+  const f = await API.get('/api/firewall');
+  if (!f.available) {
+    $('page-content').innerHTML = `<h2>Firewall</h2>
+      <div class="alert alert-info">ufw is not installed on this host, so there is nothing to manage here.
+        Install it (<code>apt install ufw</code>) and reload this page.</div>`;
+    return;
+  }
+  if (!f.status_known) {
+    $('page-content').innerHTML = `<h2>Firewall</h2>
+      <div class="alert alert-warning">ufw is installed but the dashboard could not query it — most likely the
+        sudoers rule for <code>ufw</code> is missing on this node (added by the installer; older installs need it
+        added to <code>/etc/sudoers.d</code> by hand).</div>`;
+    return;
+  }
+  const badge = f.active
+    ? '<span class="status-badge green">active</span>'
+    : '<span class="status-badge red">inactive</span>';
+  const d = f.defaults || {};
+  const rows = (f.rules || []).map(r => `<tr>
+      <td><code>${escapeHtml(r.to)}</code>${r.v6 ? ' <span class="help">(v6)</span>' : ''}</td>
+      <td><span class="status-badge ${(r.action === 'ALLOW' || r.action === 'LIMIT') ? 'green' : 'red'}">${escapeHtml(r.action)}</span></td>
+      <td>${escapeHtml(r.from || 'Anywhere')}</td>
+      <td class="help">${escapeHtml(r.comment || '')}</td>
+      <td><button class="btn btn-sm btn-outline"
+            onclick="fwDeleteRule(${r.number}, '${jsArg(r.to)}', '${jsArg(r.action)}', '${jsArg(r.from)}')">Delete</button></td>
+    </tr>`).join('');
+  const toggleBtn = f.active
+    ? `<button class="btn btn-outline" onclick="fwDisable()">Disable Firewall</button>`
+    : `<button class="btn" onclick="fwEnableModal()">Enable Firewall</button>`;
+  $('page-content').innerHTML = `
+    <h2>Firewall ${badge}</h2>
+    <p class="help">Host firewall (ufw) — inbound traffic control. Port <code>${f.dashboard_port}</code> serves
+      this dashboard and is protected: it is allowed automatically and cannot be blocked from this page.</p>
+    <div class="toolbar">${toggleBtn}</div>
+    <h3 style="margin-top:24px">Default policy</h3>
+    <div style="display:flex;gap:8px;align-items:end;max-width:560px">
+      <div class="form-group" style="flex:1"><label>Incoming traffic</label>
+        <select id="fw-default-in" class="form-control">
+          <option value="deny" ${d.incoming !== 'allow' && d.incoming !== 'reject' ? 'selected' : ''}>Deny (block everything not allowed below)</option>
+          <option value="reject" ${d.incoming === 'reject' ? 'selected' : ''}>Reject (block + tell the sender)</option>
+          <option value="allow" ${d.incoming === 'allow' ? 'selected' : ''}>Allow (only blocked ports are stopped)</option>
+        </select></div>
+      <div class="form-group"><button class="btn" onclick="fwSetPolicy()">Apply</button></div>
+    </div>
+    <p class="help">Currently: incoming <strong>${escapeHtml(d.incoming || '?')}</strong>,
+      outgoing <strong>${escapeHtml(d.outgoing || '?')}</strong> (outgoing is left alone — servers need to reach out).</p>
+    ${f.active ? `
+    <h3 style="margin-top:24px">Rules</h3>
+    <table class="table">
+      <thead><tr><th>Port / To</th><th>Action</th><th>From</th><th></th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5">No rules yet — with default deny, add an allow rule per service you expose.</td></tr>'}</tbody>
+    </table>
+    <div class="toolbar"><button class="btn" onclick="fwRuleModal()">+ Add Rule</button></div>`
+    : `<div class="alert alert-info">The firewall is <strong>inactive</strong> — all traffic is currently accepted.
+        Rules are shown and managed while the firewall is enabled.</div>`}`;
+}
+
+function fwEnableModal() {
+  openModal('Enable Firewall', `
+    <p>Enabling turns on the default policy immediately. To prevent lockouts, an allow rule for the
+      dashboard port is added automatically.</p>
+    <div class="form-group"><label><input type="checkbox" id="fw-allow-ssh" checked>
+      Also allow SSH (port 22) — recommended if you manage this machine over SSH</label></div>
+    <button class="btn" onclick="fwEnable()">Enable</button>`);
+}
+async function fwEnable() {
+  const allow_ssh = $('fw-allow-ssh').checked;
+  closeModal();
+  try {
+    const r = await API.post('/api/firewall/enable', { allow_ssh });
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+  } catch (e) { alert(e.message); }
+  page_firewall();
+}
+async function fwDisable() {
+  if (!confirm('Disable the firewall? All inbound traffic will be accepted.')) return;
+  try {
+    const r = await API.post('/api/firewall/disable', {});
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+  } catch (e) { alert(e.message); }
+  page_firewall();
+}
+async function fwSetPolicy() {
+  const incoming = $('fw-default-in').value;
+  try {
+    const r = await API.post('/api/firewall/policy', { incoming });
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+  } catch (e) { alert(e.message); }
+  page_firewall();
+}
+
+function fwRuleModal() {
+  openModal('Add Firewall Rule', `
+    <div class="form-group"><label>Action</label>
+      <select id="fw-action" class="form-control">
+        <option value="allow">Allow</option>
+        <option value="deny">Deny (drop silently)</option>
+        <option value="reject">Reject (refuse + notify sender)</option>
+        <option value="limit">Limit (allow, rate-limited — good for SSH)</option>
+      </select></div>
+    <div class="form-group"><label>Port</label><input id="fw-port" class="form-control" placeholder="e.g. 445"></div>
+    <div class="form-group"><label>Protocol</label>
+      <select id="fw-proto" class="form-control">
+        <option value="any">TCP + UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option>
+      </select></div>
+    <div class="form-group"><label>From (optional — IP or subnet; empty = anywhere)</label>
+      <input id="fw-source" class="form-control" placeholder="192.168.1.0/24"></div>
+    <div class="form-group"><label>Comment (optional)</label>
+      <input id="fw-comment" class="form-control" placeholder="what this rule is for"></div>
+    <button class="btn" onclick="fwAddRule()">Add Rule</button>`);
+}
+async function fwAddRule() {
+  const body = {
+    action: $('fw-action').value,
+    port: parseInt($('fw-port').value, 10),
+    proto: $('fw-proto').value,
+    source: $('fw-source').value.trim(),
+    comment: $('fw-comment').value.trim(),
+  };
+  if (!body.port) { alert('Port required'); return; }
+  try {
+    const r = await API.post('/api/firewall/rule', body);
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+    closeModal();
+  } catch (e) { alert(e.message); return; }
+  page_firewall();
+}
+async function fwDeleteRule(number, to, action, from) {
+  if (!confirm(`Delete rule [${number}] ${action} ${to} from ${from || 'Anywhere'}?`)) return;
+  try {
+    const r = await API.post('/api/firewall/rule/delete', { number, expect: { to, action, from } });
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+  } catch (e) { alert(e.message); }
+  page_firewall();
+}

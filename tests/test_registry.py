@@ -18,7 +18,7 @@ def test_descriptors_registered_and_derived():
     ids = [m['id'] for m in app.MODULES]
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
-                   'instances', 'images', 'ctnetworks', 'portforward']
+                   'instances', 'images', 'ctnetworks', 'portforward', 'firewall']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category.
     cats = {m['id']: m['category'] for m in app.MODULES}
@@ -49,10 +49,12 @@ def test_module_hooks_skip_disabled(monkeypatch):
     calls = []
     desc = registry._DESCRIPTORS['zfs']
     monkeypatch.setitem(desc, 'alerts', lambda: calls.append('zfs') or [{'key': 'k', 'message': 'm'}])
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: set())
+    # firewall ships a real alerts hook — disable it so only the injected
+    # zfs hook is in play.
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall'})
     got = list(registry.module_hooks('alerts'))
     assert [mid for mid, _ in got] == ['zfs']
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs'})
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall'})
     assert list(registry.module_hooks('alerts')) == []
     monkeypatch.delitem(desc, 'alerts')
 

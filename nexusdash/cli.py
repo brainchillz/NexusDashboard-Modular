@@ -71,6 +71,11 @@ def dispatch(argv):
         # Pass argv only to commands that accept it (a tick raising TypeError
         # internally must not be retried without args).
         if len(inspect.signature(fn).parameters) >= 1:
-            return fn(argv)
-        return fn()
+            rc = fn(argv)
+        else:
+            rc = fn()
+        # A matched command must ALWAYS yield an exit code: app.py starts the
+        # web server when dispatch returns None, so a tick that forgets its
+        # `return 0` would fall through into a second (rogue) server.
+        return 0 if rc is None else rc
     return None

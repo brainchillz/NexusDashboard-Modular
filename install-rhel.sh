@@ -106,6 +106,9 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/lsblk
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/lsscsi
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/ip
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/smartctl
+# Host firewall (Firewall module) — ufw is EPEL-only on RHEL-family; the rule
+# is harmless when the binary is absent and the module reports "not installed".
+dashboard ALL=(ALL) NOPASSWD: /usr/sbin/ufw
 # Disk wipe (blank a free/stale disk). Eligibility is enforced in app.py.
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/mdadm
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/wipefs

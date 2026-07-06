@@ -22,7 +22,7 @@ def create_app():
     from .core import summary, history, metrics, tasks, alerts
     from .modules import (disks, gpu, logs, zfs, iscsi, nfs, smb, minidlna,
                           replication, maintenance, llama, network, schedules,
-                          lvm, mdraid)
+                          lvm, mdraid, firewall)
 
     app.before_request(auth.require_login)
     app.after_request(audit._audit_request)
@@ -46,7 +46,8 @@ def create_app():
                                      console as ct_console)
     feature_modules = (disks, zfs, lvm, mdraid, schedules, replication,
                        maintenance, iscsi, nfs, smb, minidlna, llama, gpu,
-                       ct_instances, ct_images, ct_networks, ct_portforward)
+                       ct_instances, ct_images, ct_networks, ct_portforward,
+                       firewall)
     for mod in feature_modules:
         registry.register_module(mod.MODULE)
     for mod in feature_modules:

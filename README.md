@@ -1,11 +1,11 @@
 # Nexus Dashboard
-<img width="1472" height="1118" alt="Screenshot 2026-07-04 at 10 12 21 PM" src="https://github.com/user-attachments/assets/05c107b5-c003-4fa9-ab37-d5a5d372616c" />
+<img width="1472" height="1118" alt="Screenshot 2026-07-04 at 10 12 21 PM" src="https://github.com/user-attachments/assets/05c107b5-c003-4fa9-ab37-d5a5d372616c" />
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
 (llama.cpp, GPU), **containers & VMs** (LXD/Incus), and **system management**
-(network/netplan, services, logs, scheduled tasks, alerting, metrics, history)
-— one app, one login, one audit trail per node.
+(network/netplan, host firewall (ufw), services, logs, scheduled tasks,
+alerting, metrics, history) — one app, one login, one audit trail per node.
 
 This is the merger of the single-file *Storage/Nexus Dashboard* and the
 *Nexus Containers* (LXD) console into one package-structured Flask app.
@@ -31,6 +31,11 @@ next restart.
 - **No build step** — vanilla-JS SPA split per category, xterm.js console for
   containers and VM serial, installable PWA, dark (burnt-orange-on-grey) and
   light themes.
+- **Firewall without foot-guns** — the Firewall page drives ufw for simple
+  inbound allow/deny, but can never block the port serving the dashboard
+  itself: it is auto-allowed when enabling or defaulting to deny (without ever
+  widening an existing source-restricted rule), deny rules against it are
+  refused, and rule deletes are re-verified against the live table first.
 
 ## Install
 
@@ -68,7 +73,7 @@ app.py                  # entrypoint + compatibility facade (import app …)
 nexusdash/
   core/                 # auth/RBAC/tokens, audit, TLS, registry, aggregators
   modules/              # disks zfs lvm mdraid schedules replication maintenance
-                        # iscsi nfs smb minidlna llama gpu network logs
+                        # iscsi nfs smb minidlna llama gpu firewall network logs
   modules/containers/   # LXD/Incus: instances, images, networks, port-forward, console
 static/js/*.js          # per-category frontend, no build step
 ```
@@ -81,7 +86,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 243 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 279 tests, no root/hardware needed
 ```
 
 ## Lineage
