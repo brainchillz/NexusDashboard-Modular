@@ -35,25 +35,32 @@ DEFAULT_GLOBAL = {'workgroup': 'WORKGROUP', 'server string': '%h server (Samba)'
                   'security': 'user', 'map to guest': 'bad user', 'dns proxy': 'no'}
 
 
-def smbconf_parse():
-    """Round-trip parse: {section: {key: value}} preserving order (lowercased
-    keys). Comments/blank lines are dropped on rewrite."""
+def _parse_conf_sections(lines):
+    """smb.conf-format parse: {section: {key: value}} preserving order
+    (lowercased keys). Shared by the file parser and `net conf list` output."""
     sections = {}
     cur = None
+    for line in lines:
+        s = line.strip()
+        if not s or s[0] in '#;':
+            continue
+        if s.startswith('[') and s.endswith(']'):
+            cur = s[1:-1]
+            sections.setdefault(cur, {})
+        elif cur is not None and '=' in s:
+            k, v = s.split('=', 1)
+            sections[cur][k.strip().lower()] = v.strip()
+    return sections
+
+
+def smbconf_parse():
+    """Round-trip parse of /etc/samba/smb.conf. Comments/blank lines are
+    dropped on rewrite."""
     try:
         with open(SMBCONF_FILE) as f:
-            for line in f:
-                s = line.strip()
-                if not s or s[0] in '#;':
-                    continue
-                if s.startswith('[') and s.endswith(']'):
-                    cur = s[1:-1]
-                    sections.setdefault(cur, {})
-                elif cur is not None and '=' in s:
-                    k, v = s.split('=', 1)
-                    sections[cur][k.strip().lower()] = v.strip()
+            sections = _parse_conf_sections(f)
     except FileNotFoundError:
-        pass
+        sections = {}
     if 'global' not in sections:
         sections = {'global': dict(DEFAULT_GLOBAL), **sections}
     return sections
@@ -97,35 +104,122 @@ def _yn(v, default='no'):
     return 'yes' if str(v).lower() in ('yes', 'true', '1', 'on') else ('no' if v not in (None, '') else default)
 
 
+# ─── Samba registry backend (net conf) ───────────────────────────────
+# Cockpit's file-sharing page stores its shares in Samba's registry — smb.conf
+# carries only `include = registry` and the share sections live in registry.tdb,
+# managed with `net conf` (list/addshare/delshare/setparm/delparm; never
+# `import`, whose file argument would be read as root). Both backends are
+# surfaced side by side: every share row carries `backend: 'file'|'registry'`
+# and writes route to the store the share actually lives in (registry wins if
+# a name somehow exists in both — that matches smbd, which loads the registry
+# include last). smbd picks registry changes up on its own (same as Cockpit),
+# so no reload is issued for registry writes. Where `net conf` is unavailable
+# (no samba, no sudoers grant) everything degrades to file-only behavior.
+
+def registry_conf_list():
+    """(sections, ok) from `net conf list`. ok=False → registry unreadable
+    (no net binary / no sudoers grant); callers fall back to file-only."""
+    out, _, rc = run(['net', 'conf', 'list'])
+    if rc != 0:
+        return {}, False
+    return _parse_conf_sections(out.splitlines()), True
+
+
+def registry_included():
+    """True when smb.conf actually pulls the registry into the live config."""
+    g = smbconf_parse().get('global', {})
+    return (g.get('include', '').strip().lower() == 'registry'
+            or _yn(g.get('registry shares', 'no')) == 'yes'
+            or g.get('config backend', '').strip().lower() == 'registry')
+
+
+# Every parameter smb_share_save can emit. Registry updates touch ONLY these
+# (setparm when set, delparm when cleared), so params written by Cockpit that
+# this UI doesn't manage (`inherit permissions`, `force create mode`, ...)
+# survive an edit — unlike file shares, whose section is rewritten wholesale.
+REGISTRY_MANAGED_KEYS = [
+    'comment', 'path', 'browseable', 'read only', 'guest ok', 'available',
+    'valid users', 'write list', 'read list', 'admin users',
+    'hosts allow', 'hosts deny', 'force user', 'force group',
+    'create mask', 'directory mask', 'vfs objects',
+    'fruit:time machine', 'fruit:metadata',
+    'recycle:repository', 'recycle:keeptree', 'recycle:versions',
+    'shadow:snapdir', 'shadow:sort', 'shadow:localtime',
+    'shadow:snapprefix', 'shadow:delimiter', 'shadow:format',
+    'full_audit:prefix', 'full_audit:success', 'full_audit:failure',
+    'full_audit:facility', 'full_audit:priority',
+]
+
+
+def registry_share_upsert(name, kv, existing):
+    """Create/update a registry share via `net conf`. `existing` is the
+    share's current param dict from registry_conf_list() (None = create)."""
+    if existing is None:
+        r = run_safe(['net', 'conf', 'addshare', name, kv['path']])
+        if not r['success']:
+            return r
+        existing = {'path': kv['path']}
+    for key in REGISTRY_MANAGED_KEYS:
+        val = kv.get(key)
+        if val not in (None, ''):
+            if existing.get(key) != val:
+                r = run_safe(['net', 'conf', 'setparm', name, key, val])
+                if not r['success']:
+                    return r
+        elif key in existing:
+            r = run_safe(['net', 'conf', 'delparm', name, key])
+            if not r['success']:
+                return r
+    return {'success': True}
+
+
+@bp.route('/api/smb/registry')
+def smb_registry_status():
+    sections, ok = registry_conf_list()
+    return jsonify({
+        'enabled': registry_included(),
+        'accessible': ok,
+        'share_count': sum(1 for n in sections if n.lower() not in ('global', 'homes')),
+    })
+
+
+def _share_row(name, kv, backend):
+    objs = kv.get('vfs objects', '')
+    return {
+        'name': name,
+        'backend': backend,
+        'path': kv.get('path', ''),
+        'comment': kv.get('comment', ''),
+        'read_only': kv.get('read only', 'yes'),
+        'browseable': kv.get('browseable', 'yes'),
+        'guest_ok': kv.get('guest ok', 'no'),
+        'available': kv.get('available', 'yes'),
+        'valid_users': kv.get('valid users', ''),
+        'write_list': kv.get('write list', ''),
+        'read_list': kv.get('read list', ''),
+        'admin_users': kv.get('admin users', ''),
+        'hosts_allow': kv.get('hosts allow', ''),
+        'hosts_deny': kv.get('hosts deny', ''),
+        'force_user': kv.get('force user', ''),
+        'force_group': kv.get('force group', ''),
+        'create_mask': kv.get('create mask', ''),
+        'directory_mask': kv.get('directory mask', ''),
+        'vfs': {'recycle': 'recycle' in objs, 'shadow_copy': 'shadow_copy2' in objs,
+                'time_machine': 'fruit' in objs, 'audit': 'full_audit' in objs},
+    }
+
+
 @bp.route('/api/smb/shares')
 def smb_shares():
-    sections = smbconf_parse()
+    reg_sections, reg_ok = registry_conf_list()
+    reg_names = {n for n in reg_sections if n.lower() not in ('global', 'homes')} if reg_ok else set()
     shares = []
-    for name, kv in sections.items():
-        if name.lower() in ('global', 'homes'):
+    for name, kv in smbconf_parse().items():
+        if name.lower() in ('global', 'homes') or name in reg_names:
             continue
-        objs = kv.get('vfs objects', '')
-        shares.append({
-            'name': name,
-            'path': kv.get('path', ''),
-            'comment': kv.get('comment', ''),
-            'read_only': kv.get('read only', 'yes'),
-            'browseable': kv.get('browseable', 'yes'),
-            'guest_ok': kv.get('guest ok', 'no'),
-            'available': kv.get('available', 'yes'),
-            'valid_users': kv.get('valid users', ''),
-            'write_list': kv.get('write list', ''),
-            'read_list': kv.get('read list', ''),
-            'admin_users': kv.get('admin users', ''),
-            'hosts_allow': kv.get('hosts allow', ''),
-            'hosts_deny': kv.get('hosts deny', ''),
-            'force_user': kv.get('force user', ''),
-            'force_group': kv.get('force group', ''),
-            'create_mask': kv.get('create mask', ''),
-            'directory_mask': kv.get('directory mask', ''),
-            'vfs': {'recycle': 'recycle' in objs, 'shadow_copy': 'shadow_copy2' in objs,
-                    'time_machine': 'fruit' in objs, 'audit': 'full_audit' in objs},
-        })
+        shares.append(_share_row(name, kv, 'file'))
+    for name in reg_names:
+        shares.append(_share_row(name, reg_sections[name], 'registry'))
     return jsonify(shares)
 
 
@@ -202,8 +296,20 @@ def smb_share_save():
         kv['vfs objects'] = ' '.join(objects)
         kv.update(extra)
 
+    backend = (data.get('backend') or '').strip().lower()
+    if backend not in ('', 'file', 'registry'):
+        return err('Invalid backend')
+    reg_sections, reg_ok = registry_conf_list()
+    if not backend:
+        # No explicit choice: keep the share where it already lives.
+        backend = 'registry' if (reg_ok and name in reg_sections) else 'file'
+    if backend == 'registry' and not reg_ok:
+        return err('Samba registry is not accessible on this node')
+
     run_safe(['mkdir', '-p', '--', path])
     run_safe(['chmod', '2775', '--', path])
+    if backend == 'registry':
+        return jsonify(registry_share_upsert(name, kv, reg_sections.get(name)))
     sections = smbconf_parse()
     sections[name] = kv
     return jsonify(smbconf_apply(sections))
@@ -213,6 +319,9 @@ def smb_share_save():
 def smb_share_delete(name):
     if not RE_SHARE.match(name):
         return err('Invalid share name')
+    reg_sections, reg_ok = registry_conf_list()
+    if reg_ok and name in reg_sections:
+        return jsonify(run_safe(['net', 'conf', 'delshare', name]))
     sections = smbconf_parse()
     if name in sections:
         del sections[name]
@@ -223,6 +332,11 @@ def smb_share_delete(name):
 def smb_share_toggle(name):
     if not RE_SHARE.match(name):
         return err('Invalid share name')
+    reg_sections, reg_ok = registry_conf_list()
+    if reg_ok and name in reg_sections:
+        if reg_sections[name].get('available', 'yes').strip().lower() == 'no':
+            return jsonify(run_safe(['net', 'conf', 'delparm', name, 'available']))
+        return jsonify(run_safe(['net', 'conf', 'setparm', name, 'available', 'no']))
     sections = smbconf_parse()
     if name not in sections:
         return err('No such share', 404)

@@ -54,15 +54,16 @@ async function page_logs() {
 }
 
 async function page_services() {
+  // The install column is decoration — never let its fetch sink the page.
   const [status, install] = await Promise.all([
     API.get('/api/status'),
-    API.get('/api/install/status')
+    API.get('/api/install/status').catch(() => null)
   ]);
   let rows = Object.entries(status).map(([k, v]) => `
     <tr>
       <td>${escapeHtml(v.name)}</td>
-      <td>${escapeHtml(install[k]?.package || '-')}</td>
-      <td><span class="status-badge ${install[k]?.installed ? 'green' : 'red'}">${install[k]?.installed ? 'Installed' : 'Missing'}</span></td>
+      <td>${install ? escapeHtml(install[k]?.package || '-') : '-'}</td>
+      <td>${install ? `<span class="status-badge ${install[k]?.installed ? 'green' : 'red'}">${install[k]?.installed ? 'Installed' : 'Missing'}</span>` : '-'}</td>
       <td><span class="status-badge ${v.active === 'active' ? 'green' : v.active === 'inactive' ? 'yellow' : 'red'}">${v.active}</span></td>
       <td><span class="status-badge ${v.enabled === 'enabled' ? 'green' : 'gray'}">${v.enabled}</span></td>
       <td>
@@ -75,7 +76,7 @@ async function page_services() {
       </td>
     </tr>
   `).join('');
-  let missing = Object.entries(install).filter(([,v]) => !v.installed).length;
+  let missing = install ? Object.entries(install).filter(([,v]) => !v.installed).length : 0;
   $('page-content').innerHTML = `
     <h2>Service Manager</h2>
     ${missing > 0 ? `<div class="alert alert-warning">${missing} service(s) not installed. Run <code>sudo ./install-prerequisites.sh</code> on the host to install them.</div>` : ''}

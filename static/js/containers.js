@@ -17,10 +17,12 @@ function instancesTable(insts) {
     const running = (i.status || '').toLowerCase() === 'running';
     const ips = (i.ipv4 || []).join(', ') || '—';
     const nm = jsArg(i.name);
+    const isVM = i.type === 'virtual-machine';
     let actions = '';
     if (currentRole === 'admin') {
       actions = running
         ? `<button class="btn btn-sm" onclick="openConsole('${nm}')">Console</button>
+           ${isVM ? `<button class="btn btn-sm" onclick="openGraphical('${nm}')">Graphical</button>` : ''}
            <button class="btn btn-sm" onclick="instAction('${nm}','restart',true)">Restart</button>
            <button class="btn btn-sm btn-warning" onclick="instAction('${nm}','stop',true)">Stop</button>`
         : `<button class="btn btn-sm btn-success" onclick="instAction('${nm}','start',false)">Start</button>`;
@@ -107,7 +109,9 @@ async function openInstance(name) {
   const netLine = `<p><strong>Network (eth0):</strong> <span class="mono">${escapeHtml(curNet)}</span>
     ${admin ? ` <button class="btn btn-sm" onclick="changeNetwork('${jsArg(name)}')">Change network</button>` : ''}</p>`;
   const limits = `${cfg['limits.cpu']||'—'} CPU · ${cfg['limits.memory']||'—'} mem`;
+  const vmRunning = d.type === 'virtual-machine' && (d.status || '').toLowerCase() === 'running';
   const actions = admin ? `<div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">
+      ${vmRunning ? `<button class="btn btn-sm" onclick="openGraphical('${jsArg(name)}')">Graphical console</button>` : ''}
       <button class="btn btn-sm" onclick="editLimits('${jsArg(name)}')">Edit limits</button>
       <button class="btn btn-sm" onclick="openProxyAdd('${jsArg(name)}')">Add port forward</button>
       <button class="btn btn-sm" onclick="renameInstance('${jsArg(name)}')">Rename</button>
@@ -323,6 +327,13 @@ function closeConsole() {
   try { if (_termWs) _termWs.close(); } catch (e) {}
   try { if (_term) _term.dispose(); } catch (e) {}
   _termWs = null; _term = null; _fit = null;
+}
+// Graphical (SPICE/VGA) console for VMs — a separate ES-module page (spice-html5),
+// so it opens in its own window rather than inline in the SPA.
+function openGraphical(name) {
+  window.open('/console/vga/' + encodeURIComponent(name),
+    'vga_' + name.replace(/[^A-Za-z0-9_]/g, '_'),
+    'width=1120,height=840,resizable=yes,scrollbars=yes');
 }
 function startConsole(name, mode) {
   const el = $('console-term');

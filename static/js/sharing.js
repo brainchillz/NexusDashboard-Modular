@@ -438,22 +438,25 @@ async function nfsDeleteExport(path) {
 let smbState = { users: [], groups: [] };
 
 async function page_smb() {
-  const [shares, status, users, groups, homes, glob] = await Promise.all([
+  const [shares, status, users, groups, homes, glob, registry] = await Promise.all([
     API.get('/api/smb/shares'),
     API.get('/api/smb/status'),
     API.get('/api/smb/users'),
     API.get('/api/smb/groups'),
     API.get('/api/smb/homes'),
-    API.get('/api/smb/global')
+    API.get('/api/smb/global'),
+    API.get('/api/smb/registry')
   ]);
-  smbState = { users, groups, shares, glob };
+  smbState = { users, groups, shares, glob, registry };
+  const showBackend = registry.accessible && (registry.enabled || registry.share_count > 0);
 
   const shareRows = shares.map(s => {
     const vfsBadges = Object.entries(s.vfs || {}).filter(([, on]) => on)
       .map(([k]) => `<span class="status-badge gray" style="font-size:10px">${k === 'shadow_copy' ? 'prev-ver' : k === 'time_machine' ? 'timemachine' : k}</span>`).join(' ');
     const disabled = s.available === 'no';
+    const backendBadge = showBackend ? ` <span class="status-badge ${s.backend === 'registry' ? 'yellow' : 'gray'}" style="font-size:10px">${s.backend === 'registry' ? 'registry' : 'smb.conf'}</span>` : '';
     return `<tr${disabled ? ' style="opacity:0.55"' : ''}>
-      <td><strong>${escapeHtml(s.name)}</strong>${disabled ? ' <span class="status-badge gray">disabled</span>' : ''}</td>
+      <td><strong>${escapeHtml(s.name)}</strong>${backendBadge}${disabled ? ' <span class="status-badge gray">disabled</span>' : ''}</td>
       <td>${escapeHtml(s.path)}</td>
       <td>${escapeHtml(s.read_only)}</td>
       <td>${escapeHtml(s.valid_users || '-')} ${vfsBadges}</td>
@@ -624,8 +627,22 @@ function smbShareModal(name) {
   const val = (k, d = '') => escapeHtml(s[k] != null ? s[k] : d);
   const sel = (cur, opt) => cur === opt ? 'selected' : '';
   const chk = b => b ? 'checked' : '';
+  const reg = smbState.registry || {};
+  // Registry-backed nodes (Cockpit file-sharing style): choose the store on
+  // create, keep the share where it lives on edit.
+  let backendField = '';
+  if (name) {
+    backendField = `<input type="hidden" id="sm-backend" value="${s.backend || 'file'}">`;
+  } else if (reg.accessible && reg.enabled) {
+    backendField = `<div class="form-group"><label>Store in</label>
+      <select id="sm-backend" class="form-control">
+        <option value="registry">Samba registry (Cockpit-compatible)</option>
+        <option value="file">smb.conf</option>
+      </select></div>`;
+  }
   openModal(name ? 'Edit Share: ' + name : 'Create SMB Share', `
     <div class="form-group"><label>Share Name</label><input id="sm-name" class="form-control" value="${val('name')}" ${name ? 'readonly' : ''} placeholder="sharename"></div>
+    ${backendField}
     <div class="form-group"><label>Path</label><input id="sm-path" class="form-control" value="${val('path')}" placeholder="/srv/smb/share"></div>
     <div class="form-group"><label>Comment</label><input id="sm-comment" class="form-control" value="${val('comment')}"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -666,6 +683,7 @@ async function smbSaveShare() {
   try {
     const r = await API.post('/api/smb/shares', {
       name, path,
+      backend: $('sm-backend') ? $('sm-backend').value : '',
       comment: $('sm-comment').value, read_only: $('sm-ro').value, guest_ok: $('sm-guest').value,
       browseable: $('sm-browse').value, valid_users: $('sm-valid').value, write_list: $('sm-write').value,
       read_list: $('sm-read').value, hosts_allow: $('sm-hallow').value, hosts_deny: $('sm-hdeny').value,

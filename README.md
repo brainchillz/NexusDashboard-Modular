@@ -28,8 +28,9 @@ next restart.
   NexusController for enroll/skew-detection/auto-classification; Prometheus
   `/metrics`; bounded on-disk history with forecasts.
 - **No build step** — vanilla-JS SPA split per category, xterm.js console for
-  containers and VM serial, installable PWA, dark (burnt-orange-on-grey) and
-  light themes.
+  containers and VM serial + an in-browser **graphical (SPICE/VGA) console** for
+  VMs (spice-html5), installable PWA, dark (burnt-orange-on-grey) and light
+  themes.
 - **Firewall without foot-guns** — the Firewall page drives ufw for simple
   inbound allow/deny, but can never block the port serving the dashboard
   itself: it is auto-allowed when enabling or defaulting to deny (without ever
@@ -92,7 +93,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 342 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 399 tests, no root/hardware needed
 ```
 
 ## Lineage

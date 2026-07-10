@@ -33,6 +33,9 @@ SYSTEM_SERVICES = {
     # operational emergency, so it never raises health alerts (alert=False).
     'minidlna': {'name': 'MiniDLNA', 'service': 'minidlna', 'pkg': 'minidlna',
                  'binary': '/usr/sbin/minidlnad', 'alert': False},
+    # Reverse-proxy front door — absent on most nodes by design (alert=False).
+    'caddy': {'name': 'Caddy', 'service': 'caddy', 'pkg': 'caddy',
+              'binary': '/usr/bin/caddy', 'alert': False},
 }
 
 # Per-family overrides for the services whose systemd unit and/or package name

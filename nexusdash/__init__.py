@@ -22,7 +22,7 @@ def create_app():
     from .core import summary, history, metrics, tasks, alerts
     from .modules import (disks, gpu, logs, zfs, iscsi, nfs, smb, minidlna,
                           replication, maintenance, llama, network, schedules,
-                          lvm, mdraid, firewall, docker, docker_compose)
+                          lvm, mdraid, firewall, docker, docker_compose, caddy)
 
     app.before_request(auth.require_login)
     app.after_request(audit._audit_request)
@@ -47,7 +47,7 @@ def create_app():
     feature_modules = (disks, zfs, lvm, mdraid, schedules, replication,
                        maintenance, iscsi, nfs, smb, minidlna, llama, gpu,
                        ct_instances, ct_images, ct_networks, ct_portforward,
-                       docker, docker_compose, firewall)
+                       docker, docker_compose, firewall, caddy)
     for mod in feature_modules:
         registry.register_module(mod.MODULE)
     for mod in feature_modules:
@@ -61,9 +61,14 @@ def create_app():
     registry.register_module(metrics.MODULE)
     registry.mark_loaded('metrics')
 
-    # Console websockets (xterm.js <-> daemon proxies). Not blueprint-scoped,
-    # so they can't ride the runtime gate — each handler re-checks its own
-    # module toggle on every connection.
+    # The graphical (SPICE/VGA) console page — a plain blueprint (not a module
+    # descriptor); it re-checks admin + the instances toggle itself, same as its
+    # websocket. Serves the spice-html5 host page for VM instances.
+    app.register_blueprint(ct_console.bp)
+
+    # Console websockets (xterm.js / spice-html5 <-> daemon proxies). Not
+    # blueprint-scoped, so they can't ride the runtime gate — each handler
+    # re-checks its own module toggle on every connection.
     from .modules import docker_console
     from flask_sock import Sock
     sock = Sock(app)

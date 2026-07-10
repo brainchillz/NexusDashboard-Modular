@@ -128,6 +128,11 @@ dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-snap-fs
 # restores on failure). The helper is the trust boundary — not writable by dashboard.
 dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-netplan
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl, /usr/sbin/hostnamectl
+# Caddy module: a root-owned helper that validates a candidate Caddyfile with
+# `caddy validate` BEFORE writing it, then reloads the service (restoring the
+# previous file if the reload is refused). The helper is the trust boundary —
+# not writable by dashboard.
+dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-caddy
 # Plain-disk mount: a root-owned helper that mounts/unmounts under /mnt|/media
 # and edits its own block in /etc/fstab (always `nofail`). It validates every
 # argument and confines the mount point — it is the trust boundary, so it must
@@ -179,6 +184,10 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/testparm
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/smbpasswd
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/smbstatus
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/pdbedit
+# Samba registry shares (Cockpit file-sharing stores shares there). Only the
+# exact `net conf` verbs the app uses — deliberately NOT `net conf import`,
+# whose file argument would be read as root, and no other `net` subcommands.
+dashboard ALL=(ALL) NOPASSWD: /usr/bin/net conf list, /usr/bin/net conf addshare *, /usr/bin/net conf delshare *, /usr/bin/net conf setparm *, /usr/bin/net conf delparm *
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/useradd
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/groupadd
 dashboard ALL=(ALL) NOPASSWD: /usr/sbin/groupdel
@@ -459,6 +468,179 @@ if __name__ == '__main__':
 HELPER
 chown root:root "$NETPLAN_HELPER"
 chmod 755 "$NETPLAN_HELPER"
+
+info "Installing caddy (reverse proxy) helper..."
+# Root-owned: validates a candidate Caddyfile with `caddy validate` BEFORE the
+# live file is touched, backs the previous one up, replaces it atomically, and
+# reloads caddy only when it is running (restoring the previous file if the
+# reload is refused, so file and running config never diverge). Also replaces
+# cert/key pairs (validated + confined to /etc/caddy). NOT writable by dashboard.
+CADDY_HELPER="/usr/local/sbin/nexus-dashboard-caddy"
+cat > "$CADDY_HELPER" << 'HELPER'
+#!/usr/bin/env python3
+# Root-owned helper for the Nexus Dashboard caddy module.
+#   apply  (Caddyfile on stdin): validate the candidate (written to a temp file
+#          IN /etc/caddy so relative `import`s resolve; nothing live is touched
+#          on failure), back up + atomically replace the managed file, then
+#          `systemctl reload caddy` when the service is running (restore the
+#          previous file + non-zero exit if the reload is refused).
+#   cert <cert-path> <key-path>  (JSON {"cert","key"} PEMs on stdin): replace
+#          an EXISTING cert/key pair referenced by the Caddyfile. Both paths
+#          are confined to /etc/caddy; the pair must parse and match (openssl
+#          public-key comparison) before anything is written; owner/mode are
+#          preserved from the files being replaced; reload as above, restoring
+#          both files if it is refused.
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+MANAGED = '/etc/caddy/Caddyfile'
+BACKUP = '/run/nexus-dashboard-caddy.prev'
+CERT_BACKUP = '/run/nexus-dashboard-caddy-cert.prev'
+CONFINE = '/etc/caddy'
+
+
+def die(msg, code=1):
+    sys.stderr.write(msg if msg.endswith('\n') else msg + '\n')
+    sys.exit(code)
+
+
+def reload_if_active(restore):
+    """`systemctl reload caddy` when it is running; on a refused reload call
+    restore() and exit non-zero so file and running config never diverge."""
+    act = subprocess.run(['systemctl', 'is-active', '--quiet', 'caddy'])
+    if act.returncode != 0:
+        print('applied (caddy is not running; the file is picked up at next start)')
+        return
+    r = subprocess.run(['systemctl', 'reload', 'caddy'],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        die('caddy reload failed (%s):\n%s' % (restore(), r.stderr or r.stdout))
+    print('applied')
+
+
+def do_apply():
+    new = sys.stdin.read()
+    if not os.path.isdir(CONFINE):
+        die('%s does not exist — is caddy installed?' % CONFINE)
+    prev = None
+    fd, tmp = tempfile.mkstemp(prefix='.nexus-caddy.', dir=CONFINE)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(new)
+        os.chmod(tmp, 0o644)
+        v = subprocess.run(['caddy', 'validate', '--adapter', 'caddyfile',
+                            '--config', tmp], capture_output=True, text=True)
+        if v.returncode != 0:
+            die('caddy validate rejected the config:\n' + (v.stderr or v.stdout))
+        if os.path.exists(MANAGED):
+            with open(MANAGED) as f:
+                prev = f.read()
+            bfd = os.open(BACKUP, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(bfd, 'w') as f:
+                f.write(prev)
+        os.replace(tmp, MANAGED)
+        tmp = None
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
+
+    def restore():
+        if prev is None:
+            return 'previous Caddyfile was absent'
+        with open(MANAGED, 'w') as f:
+            f.write(prev)
+        return 'previous Caddyfile restored'
+    reload_if_active(restore)
+
+
+def _confined(path):
+    rp = os.path.realpath(path)
+    return rp if rp.startswith(CONFINE + os.sep) and rp != MANAGED else None
+
+
+def do_cert(cert_path, key_path):
+    cp, kp = _confined(cert_path), _confined(key_path)
+    if not cp or not kp or cp == kp:
+        die('cert/key must be two distinct files under %s' % CONFINE, 2)
+    if not (os.path.isfile(cp) and os.path.isfile(kp)):
+        die('replace-only: both target files must already exist', 2)
+    try:
+        data = json.loads(sys.stdin.read())
+        cert, key = data['cert'], data['key']
+    except (ValueError, KeyError, TypeError):
+        die('expected JSON {"cert": pem, "key": pem} on stdin', 2)
+
+    def ossl(args):
+        return subprocess.run(['openssl'] + args, capture_output=True, text=True)
+
+    prev = {}
+    pairs = []
+    tmps = []
+    try:
+        for path, content in ((cp, cert), (kp, key)):
+            fd, tmp = tempfile.mkstemp(prefix='.nexus-cert.',
+                                       dir=os.path.dirname(path))
+            tmps.append(tmp)
+            with os.fdopen(fd, 'w') as f:
+                f.write(content if content.endswith('\n') else content + '\n')
+            pairs.append((path, tmp))
+        tc, tk = pairs[0][1], pairs[1][1]
+        if ossl(['x509', '-in', tc, '-noout']).returncode != 0:
+            die('invalid certificate (openssl x509 rejected it)')
+        if ossl(['pkey', '-in', tk, '-noout']).returncode != 0:
+            die('invalid private key (openssl pkey rejected it)')
+        cpub = ossl(['x509', '-in', tc, '-noout', '-pubkey']).stdout.strip()
+        kpub = ossl(['pkey', '-in', tk, '-pubout']).stdout.strip()
+        if not cpub or cpub != kpub:
+            die('certificate and private key do not match')
+        # Back up + preserve owner/mode of the files being replaced.
+        for suffix, (path, tmp) in zip(('.crt', '.key'), pairs):
+            st = os.stat(path)
+            with open(path, 'rb') as f:
+                prev[path] = (f.read(), st)
+            bfd = os.open(CERT_BACKUP + suffix,
+                          os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(bfd, 'wb') as f:
+                f.write(prev[path][0])
+            os.chown(tmp, st.st_uid, st.st_gid)
+            os.chmod(tmp, st.st_mode & 0o777)
+        for path, tmp in pairs:
+            os.replace(tmp, path)
+    finally:
+        for tmp in tmps:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    def restore():
+        for path, (content, st) in prev.items():
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'wb') as f:
+                f.write(content)
+            os.chown(path, st.st_uid, st.st_gid)
+            os.chmod(path, st.st_mode & 0o777)
+        return 'previous cert/key restored'
+    reload_if_active(restore)
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == 'apply':
+        do_apply()
+    elif len(sys.argv) == 4 and sys.argv[1] == 'cert':
+        do_cert(sys.argv[2], sys.argv[3])
+    else:
+        die('usage: nexus-dashboard-caddy apply  (Caddyfile on stdin)\n'
+            '       nexus-dashboard-caddy cert <cert-path> <key-path>  '
+            '(JSON {"cert","key"} PEMs on stdin)', 2)
+
+
+if __name__ == '__main__':
+    main()
+HELPER
+chown root:root "$CADDY_HELPER"
+chmod 755 "$CADDY_HELPER"
 
 info "Installing disk mount helper..."
 # Root-owned: the trust boundary for plain-disk mounting. It confines every

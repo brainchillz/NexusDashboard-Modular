@@ -19,7 +19,7 @@ def test_descriptors_registered_and_derived():
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
                    'instances', 'images', 'ctnetworks', 'portforward', 'docker',
-                   'compose', 'firewall', 'metrics']
+                   'compose', 'firewall', 'caddy', 'metrics']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category (split
     # from a shared 'Containers' bucket when the Docker module landed, so
@@ -96,6 +96,18 @@ def test_service_management_carveout(client, monkeypatch):
     # /api/status (Services page) also stays reachable.
     monkeypatch.setattr(app, 'run', lambda *a, **k: ('inactive', '', 3))
     assert client.get('/api/status').status_code == 200
+
+
+def test_install_status_survives_disabled_minidlna(client, monkeypatch):
+    """Regression: /api/install/status reports on EVERY service but used to
+    live in the minidlna blueprint — disabling that module 403'd it and the
+    Services page died with 'module minidlna is disabled on this node'."""
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'minidlna'})
+    monkeypatch.setattr(app, 'run', lambda *a, **k: ('', '', 1))
+    r = client.get('/api/install/status')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert 'minidlna' in body and 'zfs' in body   # still reports every service
 
 
 def test_disabled_module_routes_still_registered(tmp_path, monkeypatch):

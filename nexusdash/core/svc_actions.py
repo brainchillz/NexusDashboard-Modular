@@ -58,5 +58,37 @@ def service_enable(service):
 def service_disable(service):
     return _service_action('disable', service)
 
+
+# ─── Installation Check ───────────────────────────────────────────────
+# Reports on EVERY service, so it lives here in the never-gated service core
+# (it used to sit in the minidlna module, where disabling that module 403'd
+# it and took the whole Services page down with it).
+
+def _pkg_installed(pkg):
+    """Whether a system package is installed, using the platform's package
+    manager (dpkg on Debian/Ubuntu, rpm on RHEL/Rocky)."""
+    if FAMILY == 'rhel':
+        return run(['rpm', '-q', pkg], no_sudo=True)[2] == 0
+    return 'installed' in run(['dpkg-query', '-W', "-f=${Status}", pkg])[0]
+
+
+@bp.route('/api/install/status')
+def install_status():
+    results = {}
+    for key, svc in SYSTEM_SERVICES.items():
+        pkg = svc.get('pkg')
+        if pkg:
+            results[key] = {'package': pkg, 'installed': _pkg_installed(pkg)}
+        else:
+            # Not apt-managed (e.g. llama.cpp): presence = unit file or binary.
+            installed = _unit_present(svc['service']) or Path(svc.get('binary') or '').exists()
+            results[key] = {'package': svc.get('binary') or '—', 'installed': installed}
+    return jsonify(results)
+
+# Package installation is intentionally not exposed over the API. Packages are
+# provisioned at install time by install-prerequisites.sh; granting the
+# network-facing service passwordless apt-get would be a root-escalation path.
+
+
 # ─── ZFS Pool Management ─────────────────────────────────────────────
 

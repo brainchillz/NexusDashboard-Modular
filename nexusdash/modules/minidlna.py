@@ -260,32 +260,10 @@ def minidlna_rebuild():
     return jsonify({'success': True})
 
 
-# ─── Installation Check ───────────────────────────────────────────────
-
-def _pkg_installed(pkg):
-    """Whether a system package is installed, using the platform's package
-    manager (dpkg on Debian/Ubuntu, rpm on RHEL/Rocky)."""
-    if FAMILY == 'rhel':
-        return run(['rpm', '-q', pkg], no_sudo=True)[2] == 0
-    return 'installed' in run(['dpkg-query', '-W', "-f=${Status}", pkg])[0]
-
-
-@bp.route('/api/install/status')
-def install_status():
-    results = {}
-    for key, svc in SYSTEM_SERVICES.items():
-        pkg = svc.get('pkg')
-        if pkg:
-            results[key] = {'package': pkg, 'installed': _pkg_installed(pkg)}
-        else:
-            # Not apt-managed (e.g. llama.cpp): presence = unit file or binary.
-            installed = _unit_present(svc['service']) or Path(svc.get('binary') or '').exists()
-            results[key] = {'package': svc.get('binary') or '—', 'installed': installed}
-    return jsonify(results)
-
-# Package installation is intentionally not exposed over the API. Packages are
-# provisioned at install time by install-prerequisites.sh; granting the
-# network-facing service passwordless apt-get would be a root-escalation path.
+# NOTE: /api/install/status used to live here (a single-file-split artifact —
+# it sat next to this module's install-check code) but it reports on EVERY
+# service, so it moved to core/svc_actions where the runtime module gate can
+# never 403 it. Disabling this module used to break the whole Services page.
 
 
 # ─── TLS certificate management ───────────────────────────────────────
