@@ -189,6 +189,11 @@ dashboard ALL=(ALL) NOPASSWD: /usr/sbin/modprobe raid0, /usr/sbin/modprobe raid1
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/mkdir -p -- *
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/rmdir *
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/chmod 2775 -- *
+# dnsmasq (DNS & DHCP) module: DHCP-conflict probe binds privileged UDP
+# port 68. Best-effort. systemctl/journalctl for dnsmasq use the blanket
+# lines above; the module renders its own config into a dashboard-owned
+# conf-dir, so no root helper is needed.
+dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe*
 SUDOERS
 chmod 440 $SUDOERS_FILE
 visudo -cf "$SUDOERS_FILE" >/dev/null && info "Sudoers validated at $SUDOERS_FILE" \
@@ -885,6 +890,34 @@ mkdir -p /var/log/nexus-dashboard
 chown $DASHBOARD_USER:$DASHBOARD_USER /var/log/nexus-dashboard
 
 info "Setting file ownership..."
+info "Setting up dnsmasq (DNS & DHCP) module directories..."
+mkdir -p "$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d" "$DASHBOARD_DIR/dnsmasq/render/hosts.d" \
+         "$DASHBOARD_DIR/dnsmasq/state" "$DASHBOARD_DIR/dnsmasq/leases"
+if command -v dnsmasq >/dev/null 2>&1; then
+    mkdir -p /etc/dnsmasq.d
+    cat > /etc/dnsmasq.d/zz-nexus-dashboard.conf << DROPIN
+# Managed by Nexus Dashboard (dnsmasq module). conf-dir is empty until the
+# module is enabled on the Modules page and configured (a no-op till then).
+conf-dir=$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d,*.conf
+DROPIN
+    info "dnsmasq conf-dir drop-in written (enable the DNS module to use it)"
+    # RHEL/Rocky ship /etc/dnsmasq.conf with conf-dir COMMENTED, so
+    # /etc/dnsmasq.d is not read by default (Debian enables it). Make sure our
+    # drop-in is actually seen — idempotent: only act if no active conf-dir for
+    # that dir already exists.
+    if [ -f /etc/dnsmasq.conf ] && ! grep -Eq '^[[:space:]]*conf-dir=/etc/dnsmasq\.d' /etc/dnsmasq.conf; then
+        if grep -Eq '^[[:space:]]*#[[:space:]]*conf-dir=/etc/dnsmasq\.d' /etc/dnsmasq.conf; then
+            sed -i -E 's|^[[:space:]]*#[[:space:]]*(conf-dir=/etc/dnsmasq\.d.*)|\1|' /etc/dnsmasq.conf
+            info "Enabled the commented conf-dir=/etc/dnsmasq.d line in /etc/dnsmasq.conf"
+        else
+            printf '\n# Added by Nexus Dashboard so /etc/dnsmasq.d drop-ins are read.\nconf-dir=/etc/dnsmasq.d,*.conf\n' >> /etc/dnsmasq.conf
+            info "Appended conf-dir=/etc/dnsmasq.d to /etc/dnsmasq.conf"
+        fi
+    fi
+else
+    warn "dnsmasq not installed — skipping conf-dir drop-in (add by hand if you install dnsmasq later)"
+fi
+
 chown -R $DASHBOARD_USER:$DASHBOARD_USER $DASHBOARD_DIR
 
 info "Creating systemd service..."

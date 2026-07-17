@@ -17,7 +17,7 @@ TEMPLATES_DIR = os.path.join(APP_DIR, 'templates')
 
 # Dashboard version. Surfaced via /api/version and /api/me so a cluster
 # controller can detect API/version skew across enrolled nodes.
-APP_VERSION = '2.1.0'
+APP_VERSION = '2.2.0'
 
 # Deployment naming prefix — systemd units (<prefix>.service, <prefix>-*.timer),
 # the root-owned sudo helpers in /usr/local/sbin, and derived sentinels like the

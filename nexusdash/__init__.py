@@ -22,7 +22,8 @@ def create_app():
     from .core import summary, history, metrics, tasks, alerts
     from .modules import (disks, gpu, logs, zfs, iscsi, nfs, smb, minidlna,
                           replication, maintenance, llama, network, schedules,
-                          lvm, mdraid, firewall, docker, docker_compose, caddy)
+                          lvm, mdraid, firewall, docker, docker_compose, caddy,
+                          dnsmasq)
 
     app.before_request(auth.require_login)
     app.after_request(audit._audit_request)
@@ -47,7 +48,7 @@ def create_app():
     feature_modules = (disks, zfs, lvm, mdraid, schedules, replication,
                        maintenance, iscsi, nfs, smb, minidlna, llama, gpu,
                        ct_instances, ct_images, ct_networks, ct_portforward,
-                       docker, docker_compose, firewall, caddy)
+                       docker, docker_compose, firewall, caddy, dnsmasq)
     for mod in feature_modules:
         registry.register_module(mod.MODULE)
     for mod in feature_modules:

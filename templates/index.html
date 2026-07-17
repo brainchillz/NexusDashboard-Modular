@@ -83,6 +83,14 @@
         <li class="nav-admin-only"><a href="#" data-page="caddy"><span class="icon">&#128682;</span> Caddy Proxy</a></li>
       </ul>
     </li>
+    <li class="nav-group" data-cat="dns">
+      <div class="nav-cat" onclick="toggleCat('dns')">DNS <span class="caret">&#9662;</span></div>
+      <ul class="nav-sub">
+        <li data-module="dnsmasq"><a href="#" data-page="dnshosts"><span class="icon">&#127760;</span> DNS Overrides</a></li>
+        <li data-module="dnsmasq"><a href="#" data-page="dhcp"><span class="icon">&#128268;</span> DHCP</a></li>
+        <li class="nav-admin-only" data-module="dnsmasq"><a href="#" data-page="dnsconfig"><span class="icon">&#9881;</span> DNS Config</a></li>
+      </ul>
+    </li>
     <li class="nav-group" data-cat="system">
       <div class="nav-cat" onclick="toggleCat('system')">System <span class="caret">&#9662;</span></div>
       <ul class="nav-sub">
@@ -131,5 +139,6 @@
 <script src="/static/js/containers.js"></script>
 <script src="/static/js/docker.js"></script>
 <script src="/static/js/caddy.js"></script>
+<script src="/static/js/dnsmasq.js"></script>
 </body>
 </html>

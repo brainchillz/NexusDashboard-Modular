@@ -97,7 +97,21 @@ def test_nvidia_handles_na_values():
 
 def test_gpu_vendor_none_when_no_tools(monkeypatch):
     monkeypatch.setattr(app.shutil, 'which', lambda _n: None)
+    monkeypatch.setattr(app, '_GPU_TOOL_DIRS', ())
     assert app._gpu_vendor() is None
+
+
+def test_gpu_tool_falls_back_to_known_dirs(monkeypatch, tmp_path):
+    # TheRock ROCm on amd-halo: /opt/rocm/bin is on PATH only for login
+    # shells, so which() misses it under systemd — the dir fallback must hit.
+    monkeypatch.setattr(app.shutil, 'which', lambda _n: None)
+    tool = tmp_path / 'rocm-smi'
+    tool.write_text('#!/bin/sh\n')
+    tool.chmod(0o755)
+    monkeypatch.setattr(app, '_GPU_TOOL_DIRS', (str(tmp_path),))
+    assert app._gpu_tool('rocm-smi') == str(tool)
+    assert app._gpu_tool('nvidia-smi') is None
+    assert app._gpu_vendor() == 'amd'
 
 
 def test_gpu_history_samples_emit_per_gpu(monkeypatch):

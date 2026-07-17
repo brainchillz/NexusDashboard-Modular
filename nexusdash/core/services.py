@@ -36,6 +36,11 @@ SYSTEM_SERVICES = {
     # Reverse-proxy front door — absent on most nodes by design (alert=False).
     'caddy': {'name': 'Caddy', 'service': 'caddy', 'pkg': 'caddy',
               'binary': '/usr/bin/caddy', 'alert': False},
+    # DNS/DHCP server managed by the dnsmasq module — off/absent on most nodes
+    # by design (alert=False; the module raises its own dnsmasq-down alert only
+    # when a feature is actually enabled).
+    'dnsmasq': {'name': 'Dnsmasq', 'service': 'dnsmasq', 'pkg': 'dnsmasq',
+                'binary': '/usr/sbin/dnsmasq', 'alert': False},
 }
 
 # Per-family overrides for the services whose systemd unit and/or package name

@@ -2,9 +2,10 @@
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
-(llama.cpp, GPU), **containers & VMs** (LXD/Incus), and **system management**
-(network/netplan, host firewall (ufw), services, logs, scheduled tasks,
-alerting, metrics, history) — one app, one login, one audit trail per node.
+(llama.cpp, GPU), **containers & VMs** (LXD/Incus), **DNS/DHCP** (dnsmasq), and
+**system management** (network/netplan, host firewall (ufw), services, logs,
+scheduled tasks, alerting, metrics, history) — one app, one login, one audit
+trail per node.
 
 This is the merger of the single-file *Storage/Nexus Dashboard* and the
 *Nexus Containers* (LXD) console into one package-structured Flask app.
@@ -36,12 +37,19 @@ next restart.
   itself: it is auto-allowed when enabling or defaulting to deny (without ever
   widening an existing source-restricted rule), deny rules against it are
   refused, and rule deletes are re-verified against the live table first.
+- **DNS/DHCP appliance mode** — an optional **dnsmasq** module (default-off)
+  turns a node into a DNS/DHCP server: host overrides, CNAMEs, domain
+  overrides/forwards, DHCP pools/static leases/options, external network-boot
+  options, hosts-file import, and live stats. It owns its config — renders and
+  `dnsmasq --test`-validates before every apply (SIGHUP for host/lease edits,
+  restart only for structural ones), and a broadcast DHCP probe warns before
+  you enable DHCP so you never accidentally run a second DHCP server on the LAN.
 
 ## Install
 
 ```bash
 git clone https://github.com/brainchillz/NexusDashboard-Modular.git
-cd NexusDashboard-Modular
+cd NexusDashboard-
 sudo ./install-prerequisites.sh        # Debian/Ubuntu packages (single source of truth)
 sudo ./install.sh                      # user, venv, sudoers, wrappers, timers, service
 # RHEL/Rocky: use install-prerequisites-rhel.sh + install-rhel.sh
@@ -80,7 +88,8 @@ app.py                  # entrypoint + compatibility facade (import app …)
 nexusdash/
   core/                 # auth/RBAC/tokens, audit, TLS, registry, aggregators
   modules/              # disks zfs lvm mdraid schedules replication maintenance
-                        # iscsi nfs smb minidlna llama gpu firewall docker network logs
+                        # iscsi nfs smb minidlna llama gpu firewall caddy dnsmasq
+                        # docker network logs
   modules/containers/   # LXD/Incus: instances, images, networks, port-forward, console
 static/js/*.js          # per-category frontend, no build step
 ```
@@ -93,7 +102,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 399 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 418 tests, no root/hardware needed
 ```
 
 ## Lineage

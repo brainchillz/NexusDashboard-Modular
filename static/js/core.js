@@ -166,6 +166,10 @@ async function applyModules() {
       moduleEnabled[m.id] = m.enabled;
       const a = document.querySelector(`.nav-list a[data-page="${m.id}"]`);
       if (a && a.parentElement) a.parentElement.classList.toggle('module-hidden', !m.enabled);
+      // Multi-page modules (one toggle, several nav entries) mark each <li>
+      // with data-module=<id> since data-page != the module id.
+      document.querySelectorAll(`.nav-list li[data-module="${m.id}"]`).forEach(
+        li => li.classList.toggle('module-hidden', !m.enabled));
     });
     // Hide a whole nav group (e.g. "Sharing") when every item in it is hidden.
     const readonly = document.body.classList.contains('readonly');
@@ -177,7 +181,11 @@ async function applyModules() {
     });
     // If the page currently in view just got disabled, fall back to the dashboard.
     const active = document.querySelector('.nav-list a.active');
-    if (active && moduleEnabled[active.dataset.page] === false) showPage('dashboard');
+    if (active) {
+      const mod = active.parentElement && active.parentElement.dataset.module;
+      if (moduleEnabled[active.dataset.page] === false ||
+          (mod && moduleEnabled[mod] === false)) showPage('dashboard');
+    }
   } catch (e) {}
 }
 

@@ -35,11 +35,30 @@ bp = Blueprint('gpu', __name__)
 _gpu_cache = {'ts': 0.0, 'data': None}
 
 
+# systemd services don't read /etc/profile.d, so tools that only add
+# themselves to login-shell PATH (TheRock ROCm exports /opt/rocm/bin that
+# way — amd-halo) are invisible to shutil.which here. Known install dirs
+# are checked as a fallback.
+_GPU_TOOL_DIRS = ('/opt/rocm/bin',)
+
+
+def _gpu_tool(name):
+    """Absolute path of a GPU query tool: PATH first, then known dirs."""
+    p = shutil.which(name)
+    if p:
+        return p
+    for d in _GPU_TOOL_DIRS:
+        c = os.path.join(d, name)
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
 def _gpu_vendor():
     """Which GPU query tool is installed (nvidia wins if somehow both), or None."""
-    if shutil.which('nvidia-smi'):
+    if _gpu_tool('nvidia-smi'):
         return 'nvidia'
-    if shutil.which('rocm-smi'):
+    if _gpu_tool('rocm-smi'):
         return 'amd'
     return None
 
@@ -130,13 +149,13 @@ def _gpu_snapshot(force=False):
     gpus = []
     try:
         if vendor == 'nvidia':
-            out, _, _ = run(['nvidia-smi',
+            out, _, _ = run([_gpu_tool('nvidia-smi'),
                              '--query-gpu=index,name,utilization.gpu,memory.used,'
                              'memory.total,temperature.gpu,power.draw',
                              '--format=csv,noheader,nounits'], no_sudo=True)
             gpus = _parse_nvidia_smi(out)
         elif vendor == 'amd':
-            out, _, _ = run(['rocm-smi', '--showproductname', '--showuse',
+            out, _, _ = run([_gpu_tool('rocm-smi'), '--showproductname', '--showuse',
                              '--showmemuse', '--showtemp', '--showpower',
                              '--showmeminfo', 'vram', '--json'], no_sudo=True)
             gpus = _parse_rocm_smi(out)

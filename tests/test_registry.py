@@ -14,12 +14,12 @@ from nexusdash.core import registry
 
 
 def test_descriptors_registered_and_derived():
-    # create_app() ran at facade import: all 13 dashboard modules registered.
+    # create_app() ran at facade import: all dashboard modules registered.
     ids = [m['id'] for m in app.MODULES]
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
                    'instances', 'images', 'ctnetworks', 'portforward', 'docker',
-                   'compose', 'firewall', 'caddy', 'metrics']
+                   'compose', 'firewall', 'caddy', 'dnsmasq', 'metrics']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category (split
     # from a shared 'Containers' bucket when the Docker module landed, so
@@ -53,12 +53,12 @@ def test_module_hooks_skip_disabled(monkeypatch):
     calls = []
     desc = registry._DESCRIPTORS['zfs']
     monkeypatch.setitem(desc, 'alerts', lambda: calls.append('zfs') or [{'key': 'k', 'message': 'm'}])
-    # firewall ships a real alerts hook — disable it so only the injected
-    # zfs hook is in play.
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall'})
+    # firewall and dnsmasq ship real alerts hooks — disable them so only the
+    # injected zfs hook is in play.
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall', 'dnsmasq'})
     got = list(registry.module_hooks('alerts'))
     assert [mid for mid, _ in got] == ['zfs']
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall'})
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall', 'dnsmasq'})
     assert list(registry.module_hooks('alerts')) == []
     monkeypatch.delitem(desc, 'alerts')
 
