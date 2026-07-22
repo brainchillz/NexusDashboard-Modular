@@ -1040,6 +1040,23 @@ else
     warn "    conf-dir=$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d,*.conf"
 fi
 
+info "Seeding default module state (fresh install only)..."
+# A fresh node starts as a clean storage/sharing box: the AI Tools, LXD/Incus,
+# Docker, and Caddy Proxy module groups are DISABLED by default. The operator
+# enables whatever the node needs from the Modules page — it takes effect live,
+# no restart. Written only if absent, so re-running the installer (or an
+# in-place upgrade) never clobbers operator toggles. Ids map to the categories:
+# AI Tools=gpu,llamacpp  LXD/Incus=instances,images,ctnetworks,portforward
+# Docker=docker,compose  Caddy Proxy=caddy.
+if [ ! -e "$DASHBOARD_DIR/modules.json" ]; then
+    cat > "$DASHBOARD_DIR/modules.json" << 'MODULES'
+{"disabled": ["caddy", "compose", "ctnetworks", "docker", "gpu", "images", "instances", "llamacpp", "portforward"], "enabled": []}
+MODULES
+    info "Default-off groups: AI Tools, LXD/Incus, Docker, Caddy Proxy"
+else
+    info "modules.json already present — leaving module state untouched"
+fi
+
 info "Setting file ownership..."
 chown -R $DASHBOARD_USER:$DASHBOARD_USER $DASHBOARD_DIR
 

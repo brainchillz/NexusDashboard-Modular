@@ -260,31 +260,51 @@ async function loadCreateImages() {
   const arch = serverInfo.arch || 'amd64';
   const sel = $('ci-image');
   sel.innerHTML = '<option>loading…</option>';
-  try {
-    const r = await API.get(`/api/images/remote?arch=${encodeURIComponent(arch)}&type=${encodeURIComponent(type)}`);
-    _createImages = r.images || [];
-  } catch (e) { _createImages = []; }
+  // Query EVERY configured image remote and merge the results into one list —
+  // Canonical split Ubuntu server/cloud images off images.lxd.canonical.com onto
+  // the separate `ubuntu` remote, so a single-remote list hides Ubuntu entirely.
+  // Each image is tagged with the server it came from so submitCreate can pull
+  // from the right one.
+  let remotes = [];
+  try { remotes = (await API.get('/api/images/remotes')).remotes || []; } catch (e) {}
+  if (!remotes.length) remotes = [{ url: '' }];   // fall back to the server default
+  const lists = await Promise.all(remotes.map(async r => {
+    const q = `/api/images/remote?arch=${encodeURIComponent(arch)}&type=${encodeURIComponent(type)}`
+            + (r.url ? `&server=${encodeURIComponent(r.url)}` : '');
+    try {
+      const resp = await API.get(q);
+      return (resp.images || []).map(im => ({ ...im, server: resp.server }));
+    } catch (e) { return []; }
+  }));
+  _createImages = lists.flat();
   renderCreateImages();
 }
 function renderCreateImages() {
   const f = ($('ci-imgfilter').value || '').toLowerCase();
   const sel = $('ci-image');
-  const list = _createImages.filter(im => !f || (im.os + ' ' + im.release + ' ' + im.alias + ' ' + im.variant).toLowerCase().includes(f));
-  sel.innerHTML = list.map(im =>
-    `<option value="${escapeHtml(im.alias)}">${escapeHtml(im.os)} ${escapeHtml(im.release)} · ${escapeHtml(im.variant)} (${escapeHtml(im.alias)})</option>`
+  // Keep each option's value as the image's index in _createImages so we can
+  // recover both its alias AND its source server on submit (aliases can repeat
+  // across remotes).
+  const list = _createImages
+    .map((im, i) => ({ im, i }))
+    .filter(({ im }) => !f || (im.os + ' ' + im.release + ' ' + im.alias + ' ' + im.variant).toLowerCase().includes(f));
+  sel.innerHTML = list.map(({ im, i }) =>
+    `<option value="${i}">${escapeHtml(im.os)} ${escapeHtml(im.release)} · ${escapeHtml(im.variant)} (${escapeHtml(im.alias)})</option>`
   ).join('') || '<option value="">no matching images</option>';
   if (window._prefillAlias) {
-    const opt = Array.from(sel.options).find(o => o.value === window._prefillAlias);
-    if (opt) sel.value = window._prefillAlias;
+    const idx = _createImages.findIndex(im => im.alias === window._prefillAlias);
+    if (idx >= 0) sel.value = String(idx);
     window._prefillAlias = null;
   }
 }
 async function submitCreate() {
   const errEl = $('ci-error'); errEl.style.display = 'none';
+  const chosen = _createImages[$('ci-image').value];   // value is the index into _createImages
   const body = {
     name: ($('ci-name').value || '').trim(),
     type: $('ci-type').value,
-    alias: $('ci-image').value,
+    alias: chosen ? chosen.alias : '',
+    server: chosen ? chosen.server : undefined,
     pool: $('ci-pool').value,
     network: $('ci-network').value,
     profiles: [$('ci-profile').value],

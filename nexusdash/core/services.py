@@ -41,7 +41,54 @@ SYSTEM_SERVICES = {
     # when a feature is actually enabled).
     'dnsmasq': {'name': 'Dnsmasq', 'service': 'dnsmasq', 'pkg': 'dnsmasq',
                 'binary': '/usr/sbin/dnsmasq', 'alert': False},
+    # Docker engine — the `docker` module drives containers over the socket; the
+    # service manager controls the daemon itself. pkg=None (the package name
+    # varies: docker-ce / docker.io / moby-engine), so presence is inferred from
+    # the unit file or binary. alert=False: absent on most nodes by design.
+    'docker': {'name': 'Docker', 'service': 'docker', 'pkg': None,
+               'binary': '/usr/bin/docker', 'alert': False},
+    # Host firewall — the firewall module is ufw-only, so this is ufw on
+    # Debian/Ubuntu and shows "Missing" on RHEL (firewalld), matching the
+    # module's own report. alert=False: a firewall is off on most nodes.
+    'firewall': {'name': 'UFW Firewall', 'service': 'ufw', 'pkg': 'ufw',
+                 'binary': '/usr/sbin/ufw', 'alert': False},
 }
+
+# Container runtime (LXD via snap or deb, or Incus) — the containers modules
+# talk to it over a unix socket; the service manager controls its systemd unit.
+# Which unit/label/binary applies depends on which runtime is installed, so it
+# is detected by socket path — mirroring modules/containers/client.py's
+# _daemon_detect WITHOUT importing it (core must not depend on a feature
+# module). Keyed 'instances' (the core containers module id) so disabling that
+# module hides the service line, like every other entry. alert=False.
+_CONTAINER_RUNTIMES = [
+    ('/var/snap/lxd/common/lxd/unix.socket',
+     {'name': 'LXD', 'service': 'snap.lxd.daemon', 'pkg': None,
+      'binary': '/snap/bin/lxd', 'alert': False}),
+    ('/var/lib/lxd/unix.socket',
+     {'name': 'LXD', 'service': 'lxd', 'pkg': None,
+      'binary': '/usr/bin/lxd', 'alert': False}),
+    ('/var/lib/incus/unix.socket',
+     {'name': 'Incus', 'service': 'incus', 'pkg': None,
+      'binary': '/usr/bin/incus', 'alert': False}),
+]
+
+
+def _detect_container_service():
+    override = os.environ.get('DASHBOARD_LXD_SOCKET')
+    if override:
+        if 'incus' in override:
+            return dict(_CONTAINER_RUNTIMES[2][1])
+        # Explicit LXD override: snap path → snap unit, else the deb unit.
+        return dict(_CONTAINER_RUNTIMES[0 if 'snap' in override else 1][1])
+    for path, entry in _CONTAINER_RUNTIMES:
+        if os.path.exists(path):
+            return dict(entry)
+    # None installed — still list an entry (Missing/inactive), like caddy/dnsmasq.
+    return dict(_CONTAINER_RUNTIMES[0][1])
+
+
+SYSTEM_SERVICES['instances'] = _detect_container_service()
 
 # Per-family overrides for the services whose systemd unit and/or package name
 # differ from the Debian/Ubuntu defaults above. RHEL/Rocky: Samba's unit is

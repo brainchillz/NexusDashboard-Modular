@@ -24,3 +24,6 @@ __pycache__/
 
 # Editor / harness local state
 *.swp
+
+# Build output (packaging)
+dist/

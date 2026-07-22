@@ -1,0 +1,23 @@
+# Pinned dependency set for reproducible package venvs. Resolved on the OLDEST
+# target (Rocky 9 / Python 3.9) so every pin also installs on Ubuntu 24.04
+# (3.12) and 26.04 (3.14) — older releases run on newer Pythons, not vice versa
+# (e.g. click 8.2+ dropped 3.9). importlib_metadata/zipp are Flask's 3.9
+# backports; harmless extras on newer Pythons. Regenerate on Rocky 9 with:
+#   docker run --rm rockylinux:9 sh -c 'dnf -y -q install python3 python3-pip && \
+#     python3 -m venv /v && \
+#     /v/bin/pip install -q flask flask-sock simple-websocket websocket-client && \
+#     /v/bin/pip freeze'
+blinker==1.9.0
+click==8.1.8
+Flask==3.1.3
+flask-sock==0.7.0
+h11==0.16.0
+importlib_metadata==8.7.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+simple-websocket==1.1.0
+websocket-client==1.9.0
+Werkzeug==3.1.8
+wsproto==1.2.0
+zipp==3.23.1

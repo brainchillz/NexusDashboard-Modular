@@ -105,6 +105,40 @@ def test_service_keys_are_module_ids():
     assert set(app.SYSTEM_SERVICES) <= app.MODULE_IDS
 
 
+def test_manager_lists_container_docker_firewall():
+    # The service manager derives its rows from SYSTEM_SERVICES; the container
+    # runtime, Docker, and the firewall each need an entry so they are
+    # controllable there. All three are absent on many nodes by design, so none
+    # raises a health alert (alert=False).
+    for key in ('instances', 'docker', 'firewall'):
+        assert key in app.SYSTEM_SERVICES
+        assert app.SYSTEM_SERVICES[key]['alert'] is False
+
+
+def test_container_service_detection_by_socket(monkeypatch):
+    # The container runtime's systemd unit depends on which of LXD-snap, LXD-deb,
+    # or Incus owns the socket — detected by socket path, mirroring the containers
+    # client. An explicit DASHBOARD_LXD_SOCKET override wins over fs probes.
+    import os
+    from nexusdash.core import services as svc
+    monkeypatch.delenv('DASHBOARD_LXD_SOCKET', raising=False)
+    cases = [
+        ('/var/snap/lxd/common/lxd/unix.socket', 'snap.lxd.daemon', 'LXD'),
+        ('/var/lib/lxd/unix.socket',             'lxd',             'LXD'),
+        ('/var/lib/incus/unix.socket',           'incus',           'Incus'),
+    ]
+    for present, unit, name in cases:
+        monkeypatch.setattr(os.path, 'exists', lambda p, _p=present: p == _p)
+        got = svc._detect_container_service()
+        assert (got['service'], got['name']) == (unit, name)
+    # Nothing present → still returns an entry (shows Missing), defaulting to LXD.
+    monkeypatch.setattr(os.path, 'exists', lambda p: False)
+    assert svc._detect_container_service()['name'] == 'LXD'
+    # An incus socket override forces the incus unit regardless of fs probes.
+    monkeypatch.setenv('DASHBOARD_LXD_SOCKET', '/run/incus/unix.socket')
+    assert svc._detect_container_service()['service'] == 'incus'
+
+
 def test_summary_drops_disabled_module_service(monkeypatch):
     # A disabled module must not appear in /api/summary's services block, even
     # though its unit may still be active (the Services page lists it separately).
