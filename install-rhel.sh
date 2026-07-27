@@ -193,7 +193,11 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/chmod 2775 -- *
 # port 68. Best-effort. systemctl/journalctl for dnsmasq use the blanket
 # lines above; the module renders its own config into a dashboard-owned
 # conf-dir, so no root helper is needed.
-dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe*
+# Two lines (bare + trailing `*` for interface args) instead of `dhcp-probe*`:
+# sudo-rs rejects wildcards embedded in an argument word; both sudo
+# flavours accept a lone `*` argument.
+dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe
+dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe *
 SUDOERS
 chmod 440 $SUDOERS_FILE
 visudo -cf "$SUDOERS_FILE" >/dev/null && info "Sudoers validated at $SUDOERS_FILE" \

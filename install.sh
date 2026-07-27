@@ -210,15 +210,28 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/rmdir *, /bin/rmdir *
 dashboard ALL=(ALL) NOPASSWD: /usr/bin/chmod 2775 -- *, /bin/chmod 2775 -- *
 # dnsmasq (DNS & DHCP) module: the DHCP-conflict probe binds privileged UDP
 # port 68 to detect a second DHCP server before the DHCP feature is enabled.
-# Best-effort — the toggle still works without this line (it just skips the
+# Best-effort — the toggle still works without these lines (it just skips the
 # warning). systemctl/journalctl for dnsmasq are already covered by the
 # blanket lines above; the module renders its own config into a
 # dashboard-owned conf-dir, so no root helper is needed.
-dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe*
+# Two lines (bare + trailing `*` for interface args) instead of `dhcp-probe*`:
+# sudo-rs (default sudo on Ubuntu 26.04+) rejects wildcards embedded in an
+# argument word, but both sudo flavours accept a lone `*` argument.
+dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe
+dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe *
 SUDOERS
 
 chmod 440 $SUDOERS_FILE
-info "Sudoers configured at $SUDOERS_FILE"
+# Validate against THIS host's sudo before moving on — sudo flavours differ in
+# accepted syntax (Ubuntu 26.04+ ships sudo-rs, which rejects wildcards embedded
+# in an argument word) and both flavours error-recover past a bad sudoers.d
+# file, so breakage is otherwise silent. Fail loudly and leave sudo untouched.
+if ! visudo -cf $SUDOERS_FILE; then
+    rm -f $SUDOERS_FILE
+    error "sudoers policy failed visudo validation on this host's sudo — aborting"
+    exit 1
+fi
+info "Sudoers configured at $SUDOERS_FILE (visudo-validated)"
 
 info "Installing disk-locate read helper..."
 # Root-owned (NOT writable by the dashboard user) so granting it via sudo is
