@@ -39,6 +39,9 @@ bp = Blueprint('summary', __name__)
 @bp.route('/api/status')
 def api_status():
     services = {}
+    # Additive flag only — entries are never omitted (the NexusController and
+    # fleet automation poll this endpoint); the Services page hides flagged rows.
+    disabled = load_disabled_modules()
     for key, svc in SYSTEM_SERVICES.items():
         r = run(['systemctl', 'is-active', svc['service']])
         e = run(['systemctl', 'is-enabled', svc['service']])
@@ -46,7 +49,8 @@ def api_status():
             'name': svc['name'],
             'active': r[0].strip() if r[0] else 'inactive',
             'enabled': e[0].strip() if e[0] else 'disabled',
-            'installed': Path(svc['binary']).exists() or _unit_present(svc['service'])
+            'installed': Path(svc['binary']).exists() or _unit_present(svc['service']),
+            'module_disabled': key in disabled,
         }
     return jsonify(services)
 

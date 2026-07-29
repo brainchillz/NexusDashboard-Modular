@@ -13,6 +13,7 @@ async function page_caddy() {
     : '<span class="status-badge red">inactive</span>';
   caddySitesCache = c.sites || [];
   caddyCertsCache = c.certs || [];
+  caddyAvailCertsCache = c.available_certs || c.certs || [];
   const certRows = caddyCertsCache.map((t, i) => `<tr>
       <td><code>${escapeHtml(t.cert)}</code><br><code>${escapeHtml(t.key)}</code></td>
       <td>${t.subject ? escapeHtml(t.subject) : '<span class="help">details unreadable</span>'}</td>
@@ -57,7 +58,8 @@ async function page_caddy() {
 }
 
 let caddySitesCache = [];
-let caddyCertsCache = [];
+let caddyCertsCache = [];        // pairs referenced by tls directives (Replace targets)
+let caddyAvailCertsCache = [];   // referenced + on-disk + dashboard Cert Manager pair
 let caddyEditingHost = null;   // original hostname when the modal is editing
 
 // Published TCP ports of running docker containers, for the backend picker.
@@ -92,13 +94,21 @@ async function caddySiteModal(idx) {
         ${backends.map(b => `<option value="${escapeHtml(b.value)}">${escapeHtml(b.label)}</option>`).join('')}
       </select></div>` : '';
   const curTls = s && s.tls_cert ? `${s.tls_cert} ${s.tls_key}` : '';
+  const tlsLabel = t => {
+    const base = t.subject || t.cert;
+    if (t.source === 'dashboard') return `Dashboard certificate (Cert Manager) — ${base}`;
+    if (t.source === 'disk') return `${base} — on disk, not yet referenced`;
+    return base;
+  };
   const tlsSel = `
     <div class="form-group"><label>TLS certificate</label>
       <select id="caddy-tls" class="form-control">
         <option value="">Automatic (Let's Encrypt / caddy-managed)</option>
-        ${caddyCertsCache.map(t => `<option value="${escapeHtml(`${t.cert} ${t.key}`)}"
-          ${curTls === `${t.cert} ${t.key}` ? 'selected' : ''}>${escapeHtml(t.subject || t.cert)}</option>`).join('')}
-      </select></div>`;
+        ${caddyAvailCertsCache.map(t => `<option value="${escapeHtml(`${t.cert} ${t.key}`)}"
+          ${curTls === `${t.cert} ${t.key}` ? 'selected' : ''}>${escapeHtml(tlsLabel(t))}</option>`).join('')}
+      </select>
+      <p class="help">Picking the Dashboard certificate installs a caddy-readable copy under
+        <code>/etc/caddy/certs/</code> and references that copy.</p></div>`;
   openModal(s ? `Edit Route — ${s.addresses[0]}` : 'Add Route', `
     <div class="form-group"><label>Hostname (needs a DNS record pointing here; add :port to serve a
       non-standard port, e.g. <code>host.example.com:8000</code>)</label>

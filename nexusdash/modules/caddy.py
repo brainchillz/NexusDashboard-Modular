@@ -21,7 +21,7 @@ import re
 import shutil
 from flask import Blueprint, jsonify, request
 
-from ..core.config import HELPER_PREFIX
+from ..core.config import HELPER_PREFIX, TLS_CERT, TLS_KEY
 from ..core.runcmd import run, err
 from ..core.tls import cert_info
 
@@ -30,6 +30,19 @@ bp = Blueprint('caddy', __name__)
 CADDYFILE = os.environ.get('DASHBOARD_CADDYFILE', '/etc/caddy/Caddyfile')
 CADDY_HELPER = HELPER_PREFIX + '-caddy'
 CADDY_SERVICE = 'caddy'
+
+
+def _caddy_dir():
+    return os.path.dirname(CADDYFILE) or '/etc/caddy'
+
+
+def _dashboard_pair():
+    """Where the dashboard's own Cert Manager pair is installed for caddy
+    when a route picks it (caddy cannot read the dashboard's 0600 key in
+    place)."""
+    certs = os.path.join(_caddy_dir(), 'certs')
+    return (os.path.join(certs, 'nexus-dashboard.crt'),
+            os.path.join(certs, 'nexus-dashboard.key'))
 
 # A site address: optional wildcard label, hostname, optional :port.
 RE_CADDY_HOST = re.compile(
@@ -139,8 +152,7 @@ def _sites(blocks):
 def _tls_pairs(blocks):
     """Unique (cert, key) path pairs from explicit `tls` directives anywhere
     in the file (body lines are flattened, so nested occurrences count), in
-    file order. These are the pairs the UI offers for new routes and the only
-    targets the cert-replace endpoint accepts."""
+    file order. The only targets the cert-replace endpoint accepts."""
     pairs = []
     for b in blocks:
         for line in b['body']:
@@ -148,6 +160,71 @@ def _tls_pairs(blocks):
             if m and (m.group(1), m.group(2)) not in pairs:
                 pairs.append((m.group(1), m.group(2)))
     return pairs
+
+
+_CERT_EXTS = ('.crt', '.pem', '.cer')
+# Naming noise between a cert file and its key: STAR_x.combined.crt pairs
+# with STAR_x.key.
+_STEM_NOISE = ('combined', 'fullchain', 'chain', 'bundle', 'cert', 'certificate')
+
+
+def _stem(name):
+    base = os.path.basename(name).lower().rsplit('.', 1)[0]
+    return '.'.join(p for p in base.split('.') if p not in _STEM_NOISE)
+
+
+def _disk_cert_pairs():
+    """(cert, key) pairs sitting under /etc/caddy (top level + one subdir
+    level), matched by filename stem — with a same-dir fallback when there is
+    exactly one of each. Matching is by NAME only: the dashboard user can
+    usually read certs (0644) but not keys (0640 root:caddy), and a wrong
+    pick fails cleanly at apply time (`caddy validate`/reload gate, file
+    untouched)."""
+    root = _caddy_dir()
+    dirs = [root]
+    try:
+        with os.scandir(root) as it:
+            dirs += sorted(e.path for e in it
+                           if e.is_dir(follow_symlinks=False)
+                           and not e.name.startswith('.'))
+    except OSError:
+        return []
+    pairs = []
+    for d in dirs:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        certs = [n for n in names if n.lower().endswith(_CERT_EXTS)]
+        keys = [n for n in names if n.lower().endswith('.key')]
+        for c in certs:
+            match = next((k for k in keys if _stem(k) == _stem(c)), None)
+            if match is None and len(certs) == 1 and len(keys) == 1:
+                match = keys[0]
+            if match:
+                pairs.append((os.path.join(d, c), os.path.join(d, match)))
+    return pairs
+
+
+def _available_certs(blocks):
+    """Every pair the UI may offer for a route's `tls` line: pairs the
+    Caddyfile already references, pairs found on disk under /etc/caddy, and
+    the dashboard's own Cert Manager pair (a caddy-readable copy is installed
+    on first use — see _tls_choice)."""
+    seen, out = set(), []
+
+    def add(cert, key, source):
+        if (cert, key) not in seen:
+            seen.add((cert, key))
+            out.append(dict(cert_info(cert), cert=cert, key=key, source=source))
+
+    for c, k in _tls_pairs(blocks):
+        add(c, k, 'referenced')
+    for c, k in _disk_cert_pairs():
+        add(c, k, 'disk')
+    if os.path.isfile(TLS_CERT) and os.path.isfile(TLS_KEY):
+        add(TLS_CERT, TLS_KEY, 'dashboard')
+    return out
 
 
 def _read_caddyfile():
@@ -163,7 +240,8 @@ def _read_caddyfile():
 def _caddy_status():
     st = {'available': bool(shutil.which('caddy')), 'active': False,
           'version': '', 'caddyfile': CADDYFILE, 'file_readable': False,
-          'editable': os.path.exists(CADDY_HELPER), 'sites': [], 'certs': []}
+          'editable': os.path.exists(CADDY_HELPER), 'sites': [], 'certs': [],
+          'available_certs': []}
     if not st['available']:
         return st
     out, _, rc = run(['caddy', 'version'], no_sudo=True)
@@ -178,6 +256,7 @@ def _caddy_status():
         st['sites'] = _sites(blocks)
         st['certs'] = [dict(cert_info(c), cert=c, key=k)
                        for c, k in _tls_pairs(blocks)]
+        st['available_certs'] = _available_certs(blocks)
     return st
 
 
@@ -259,16 +338,46 @@ def caddy_file_save():
     return _apply_or_err(content)
 
 
+def _install_dashboard_pair():
+    """Install (or re-sync) a caddy-readable copy of the dashboard's own
+    Cert Manager pair under /etc/caddy via the root helper — `install`
+    creates root:caddy 0644/0640, `cert` replaces an existing copy (and
+    reloads if referenced). Returns (pair-or-None, error)."""
+    try:
+        with open(TLS_CERT) as f:
+            cert_pem = f.read()
+        with open(TLS_KEY) as f:
+            key_pem = f.read()
+    except OSError:
+        return None, 'The dashboard certificate is not readable'
+    cp, kp = _dashboard_pair()
+    action = 'cert' if os.path.exists(cp) and os.path.exists(kp) else 'install'
+    out, errout, rc = run([CADDY_HELPER, action, cp, kp],
+                          input_data=json.dumps({'cert': cert_pem,
+                                                 'key': key_pem}),
+                          timeout=60)
+    if rc != 0:
+        return None, ((errout or out).strip()[-2000:]
+                      or 'certificate install failed')
+    return (cp, kp), None
+
+
 def _tls_choice(data, blocks):
     """The (cert, key) pair a site add/update asked for, validated against
-    the pairs the file already references. Returns (pair-or-None, error)."""
+    what _available_certs offers: pairs the file already references or pairs
+    on disk under /etc/caddy are used verbatim; the dashboard's Cert Manager
+    pair is swapped for a caddy-readable copy installed by the root helper.
+    Returns (pair-or-None, error)."""
     cert, key = (data.get('tls_cert') or '').strip(), (data.get('tls_key') or '').strip()
     if not cert and not key:
         return None, None
-    if (cert, key) not in _tls_pairs(blocks):
-        return None, ('That certificate pair is not referenced by the '
-                      'Caddyfile — pick one from the list or use the raw editor')
-    return (cert, key), None
+    if (cert, key) == (TLS_CERT, TLS_KEY):
+        return _install_dashboard_pair()
+    if (cert, key) in _tls_pairs(blocks) or (cert, key) in _disk_cert_pairs():
+        return (cert, key), None
+    return None, ('That certificate pair is not referenced by the Caddyfile '
+                  'or present under %s — pick one from the list or use the '
+                  'raw editor' % _caddy_dir())
 
 
 @bp.route('/api/caddy/site', methods=['POST'])

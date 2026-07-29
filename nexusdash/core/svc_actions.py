@@ -75,6 +75,9 @@ def _pkg_installed(pkg):
 @bp.route('/api/install/status')
 def install_status():
     results = {}
+    # module_disabled mirrors /api/status: additive flag, entries never omitted,
+    # so the "N service(s) not installed" nag can skip intentionally-off modules.
+    disabled = load_disabled_modules()
     for key, svc in SYSTEM_SERVICES.items():
         pkg = svc.get('pkg')
         if pkg:
@@ -83,6 +86,7 @@ def install_status():
             # Not apt-managed (e.g. llama.cpp): presence = unit file or binary.
             installed = _unit_present(svc['service']) or Path(svc.get('binary') or '').exists()
             results[key] = {'package': svc.get('binary') or '—', 'installed': installed}
+        results[key]['module_disabled'] = key in disabled
     return jsonify(results)
 
 # Package installation is intentionally not exposed over the API. Packages are

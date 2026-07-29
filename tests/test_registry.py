@@ -110,6 +110,21 @@ def test_install_status_survives_disabled_minidlna(client, monkeypatch):
     assert 'minidlna' in body and 'zfs' in body   # still reports every service
 
 
+def test_status_and_install_flag_disabled_modules(client, monkeypatch):
+    """Entries are never omitted (the controller polls /api/status) but carry
+    module_disabled so the Services page can hide intentionally-off rows and
+    skip them in the not-installed nag."""
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'minidlna'})
+    monkeypatch.setattr(app, 'run', lambda *a, **k: ('inactive', '', 3))
+    j = client.get('/api/status').get_json()
+    assert j['zfs']['module_disabled'] is True
+    assert j['smb']['module_disabled'] is False
+    j = client.get('/api/install/status').get_json()
+    assert j['minidlna']['module_disabled'] is True
+    assert j['smb']['module_disabled'] is False
+    assert 'zfs' in j and 'minidlna' in j        # still reports every service
+
+
 def test_disabled_module_routes_still_registered(tmp_path, monkeypatch):
     """A module disabled at boot is declared AND has routes (runtime-gated 403,
     not 404) so enabling it from the Modules page works without a restart."""

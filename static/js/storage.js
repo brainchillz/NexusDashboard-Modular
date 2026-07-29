@@ -368,7 +368,9 @@ async function zfsKeyUnload(name) {
 }
 
 async function zfsCreatePool() {
-  const disks = await API.get('/api/disks');
+  // Disk inventory is auxiliary here — a disabled disks module 403s, which
+  // must not break this page (empty picker instead).
+  const disks = await API.get('/api/disks').catch(() => ({ devices: [] }));
   const free = (disks.devices||[]).filter(d => d.type === 'disk' && d.usage === 'Free').map(d =>
     ({ value: `/dev/${d.name}`, label: `/dev/${d.name} (${d.size})` }));
   openModal('Create ZFS Pool', `
@@ -1039,7 +1041,7 @@ async function zfsDoReplace(pool, device) {
 }
 
 async function zfsAddVdev(pool) {
-  const disks = await API.get('/api/disks');
+  const disks = await API.get('/api/disks').catch(() => ({ devices: [] }));
   const diskItems = (disks.devices || []).filter(d => d.type === 'disk' && d.usage === 'Free').map(d =>
     ({ value: `/dev/${d.name}`, label: `/dev/${d.name} (${d.size})` }));
   openModal('Add Devices to ' + pool, `
@@ -1193,7 +1195,10 @@ async function snapRunNow(dataset) {
 let lvmState = { pvs: [], vgs: [] };
 
 async function page_lvm() {
-  const [lvm, disks] = await Promise.all([API.get('/api/lvm'), API.get('/api/disks')]);
+  const [lvm, disks] = await Promise.all([
+    API.get('/api/lvm'),
+    API.get('/api/disks').catch(() => ({ devices: [] })),   // disks module may be disabled
+  ]);
   lvmState = { pvs: lvm.pvs, vgs: lvm.vgs };
   lvmState.freeDisks = (disks.devices || []).filter(d => d.type === 'disk' && d.usage === 'Free');
 
@@ -1345,7 +1350,10 @@ async function lvmLVRemove(vg, name) {
 let mdState = { freeDisks: [], arrays: [] };
 
 async function page_mdraid() {
-  const [md, disks] = await Promise.all([API.get('/api/mdadm/arrays'), API.get('/api/disks')]);
+  const [md, disks] = await Promise.all([
+    API.get('/api/mdadm/arrays'),
+    API.get('/api/disks').catch(() => ({ devices: [] })),   // disks module may be disabled
+  ]);
   mdState.freeDisks = (disks.devices || []).filter(d => d.type === 'disk' && d.usage === 'Free');
   mdState.arrays = md.arrays;
 

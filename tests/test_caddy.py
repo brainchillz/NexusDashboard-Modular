@@ -446,6 +446,136 @@ def test_cert_replace_rejects_unknown_pair_and_bad_pem(client, caddy_tls_env):
     assert not any(a[1:2] == ['cert'] for a, _ in caddy_tls_env['calls'])
 
 
+# ─── Cert discovery (dropdown sources) ───────────────────────────────────
+
+def test_stem_pairs_naming_noise():
+    assert app._stem('STAR_example_net.combined.crt') == app._stem('STAR_example_net.key')
+    assert app._stem('example.com.fullchain.pem') == app._stem('example.com.key')
+    assert app._stem('a.crt') != app._stem('b.key')
+
+
+def test_disk_cert_pairs_discovery(tmp_path, monkeypatch):
+    (tmp_path / 'Caddyfile').write_text('')
+    certs = tmp_path / 'certs'
+    certs.mkdir()
+    (certs / 'STAR_example_net.combined.crt').write_text('x')
+    (certs / 'STAR_example_net.key').write_text('x')
+    other = tmp_path / 'other'          # unrelated names: 1-of-each fallback
+    other.mkdir()
+    (other / 'weird-name.pem').write_text('x')
+    (other / 'unrelated.key').write_text('x')
+    monkeypatch.setattr(app, 'CADDYFILE', str(tmp_path / 'Caddyfile'))
+    pairs = app._disk_cert_pairs()
+    assert (str(certs / 'STAR_example_net.combined.crt'),
+            str(certs / 'STAR_example_net.key')) in pairs
+    assert (str(other / 'weird-name.pem'), str(other / 'unrelated.key')) in pairs
+    # A key without any cert (or vice versa) pairs with nothing.
+    lone = tmp_path / 'lone'
+    lone.mkdir()
+    (lone / 'only.key').write_text('x')
+    assert not any(lone.name in c for c, _ in app._disk_cert_pairs())
+
+
+def test_available_certs_three_sources(tmp_path, monkeypatch):
+    from nexusdash.modules import caddy as caddy_mod
+    cdir = tmp_path / 'caddy'
+    (cdir / 'certs').mkdir(parents=True)
+    cf = cdir / 'Caddyfile'
+    cf.write_text(SAMPLE_TLS)
+    (cdir / 'certs' / 'wild.crt').write_text('x')
+    (cdir / 'certs' / 'wild.key').write_text('x')
+    appdir = tmp_path / 'app'
+    appdir.mkdir()
+    dc, dk = appdir / 'dashboard.crt', appdir / 'dashboard.key'
+    dc.write_text('x')
+    dk.write_text('x')
+    monkeypatch.setattr(app, 'CADDYFILE', str(cf))
+    monkeypatch.setattr(caddy_mod, 'TLS_CERT', str(dc))
+    monkeypatch.setattr(caddy_mod, 'TLS_KEY', str(dk))
+    avail = app._available_certs(app._parse_caddyfile(SAMPLE_TLS))
+    by_src = {}
+    for a in avail:
+        by_src.setdefault(a['source'], []).append((a['cert'], a['key']))
+    assert ('/etc/caddy/certs/star.crt',
+            '/etc/caddy/certs/star.key') in by_src['referenced']
+    assert (str(cdir / 'certs' / 'wild.crt'),
+            str(cdir / 'certs' / 'wild.key')) in by_src['disk']
+    assert by_src['dashboard'] == [(str(dc), str(dk))]
+
+
+def test_status_includes_available_certs(client, caddy_tls_env):
+    j = client.get('/api/caddy').get_json()
+    assert any(a['source'] == 'referenced'
+               and a['cert'] == '/etc/caddy/certs/star.crt'
+               for a in j['available_certs'])
+
+
+def test_site_add_with_disk_pair(client, caddy_env):
+    certs = caddy_env['caddyfile'].parent / 'certs'
+    certs.mkdir()
+    (certs / 'wild.crt').write_text('x')
+    (certs / 'wild.key').write_text('x')
+    r = client.post('/api/caddy/site', json={
+        'host': 'new.example.com:9000', 'upstream': '127.0.0.1:9000',
+        'tls_cert': str(certs / 'wild.crt'), 'tls_key': str(certs / 'wild.key')})
+    assert r.get_json()['success']
+    applied = _applied(caddy_env['calls'])
+    assert 'tls %s %s' % (certs / 'wild.crt', certs / 'wild.key') in applied
+
+
+def test_site_add_with_dashboard_pair_installs_copy(client, caddy_env, monkeypatch):
+    from nexusdash.modules import caddy as caddy_mod
+    d = caddy_env['caddyfile'].parent
+    dc, dk = d / 'app-dash.crt', d / 'app-dash.key'
+    dc.write_text(CERT_PEM)
+    dk.write_text(KEY_PEM)
+    monkeypatch.setattr(caddy_mod, 'TLS_CERT', str(dc))
+    monkeypatch.setattr(caddy_mod, 'TLS_KEY', str(dk))
+    r = client.post('/api/caddy/site', json={
+        'host': 'new.example.com:9000', 'upstream': '127.0.0.1:9000',
+        'tls_cert': str(dc), 'tls_key': str(dk)})
+    assert r.get_json()['success']
+    copy_crt = str(d / 'certs' / 'nexus-dashboard.crt')
+    copy_key = str(d / 'certs' / 'nexus-dashboard.key')
+    install = next((a, i) for a, i in caddy_env['calls'] if a[1:2] == ['install'])
+    assert install[0] == [caddy_env['helper'], 'install', copy_crt, copy_key]
+    import json as _json
+    assert _json.loads(install[1]) == {'cert': CERT_PEM, 'key': KEY_PEM}
+    # The written route references the caddy-readable copy, not the 0600 pair.
+    applied = _applied(caddy_env['calls'])
+    assert 'tls %s %s' % (copy_crt, copy_key) in applied
+    assert str(dc) not in applied
+
+
+def test_dashboard_pair_resyncs_existing_copy_via_cert_action(client, caddy_env,
+                                                             monkeypatch):
+    from nexusdash.modules import caddy as caddy_mod
+    d = caddy_env['caddyfile'].parent
+    dc, dk = d / 'app-dash.crt', d / 'app-dash.key'
+    dc.write_text(CERT_PEM)
+    dk.write_text(KEY_PEM)
+    (d / 'certs').mkdir()
+    (d / 'certs' / 'nexus-dashboard.crt').write_text('old')
+    (d / 'certs' / 'nexus-dashboard.key').write_text('old')
+    monkeypatch.setattr(caddy_mod, 'TLS_CERT', str(dc))
+    monkeypatch.setattr(caddy_mod, 'TLS_KEY', str(dk))
+    r = client.post('/api/caddy/site', json={
+        'host': 'new.example.com:9000', 'upstream': '127.0.0.1:9000',
+        'tls_cert': str(dc), 'tls_key': str(dk)})
+    assert r.get_json()['success']
+    assert any(a[1:2] == ['cert'] for a, _ in caddy_env['calls'])
+    assert not any(a[1:2] == ['install'] for a, _ in caddy_env['calls'])
+
+
+def test_site_add_still_rejects_arbitrary_paths(client, caddy_env):
+    r = client.post('/api/caddy/site', json={
+        'host': 'new.example.com', 'upstream': '127.0.0.1:9000',
+        'tls_cert': '/etc/ssl/private/whatever.crt',
+        'tls_key': '/etc/ssl/private/whatever.key'})
+    assert r.status_code == 400
+    assert _applied(caddy_env['calls']) is None
+
+
 # ─── Registration ────────────────────────────────────────────────────────
 
 def test_caddy_module_registered():

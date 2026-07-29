@@ -24,6 +24,25 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# --helpers-only: refresh ONLY the sudoers policy + the root-owned helper
+# scripts in /usr/local/sbin (+ the dnsmasq module prerequisites). Run this
+# after UPGRADING the application code in place: code deploys never touch
+# /usr/local/sbin, so a release that adds or changes a helper (or a sudoers
+# line) silently leaves the old ones behind until this is run once as root.
+# Idempotent; never touches app files, the venv, module state, or services.
+# Assumes fresh-install naming (nexus-dashboard-*).
+HELPERS_ONLY=0
+if [ "${1:-}" = "--helpers-only" ]; then
+    HELPERS_ONLY=1
+    if [ ! -d "$DASHBOARD_DIR" ]; then
+        error "--helpers-only refreshes an EXISTING install, but $DASHBOARD_DIR does not exist"
+        exit 1
+    fi
+    info "Helpers-only mode: refreshing sudoers + root helper scripts"
+fi
+
+if [ "$HELPERS_ONLY" = 0 ]; then
+
 info "Installing prerequisite packages..."
 if [ -f "$SCRIPT_DIR/install-prerequisites.sh" ]; then
     SD_SKIP_NEXT_STEP=1 bash "$SCRIPT_DIR/install-prerequisites.sh"
@@ -75,9 +94,19 @@ else
 fi
 deactivate
 
+fi   # HELPERS_ONLY: prerequisites/user/app/venv skipped
+
 info "Setting up sudoers permissions..."
 
 SUDOERS_FILE="/etc/sudoers.d/nexus-dashboard"
+
+# Keep the working policy restorable: on upgrades (--helpers-only) a visudo
+# rejection must put the previous file back, not strip the node's grants.
+SUDOERS_PREV=""
+if [ -f "$SUDOERS_FILE" ]; then
+    SUDOERS_PREV=$(mktemp)
+    cp "$SUDOERS_FILE" "$SUDOERS_PREV"
+fi
 
 cat > $SUDOERS_FILE << 'SUDOERS'
 # Nexus Dashboard - passwordless sudo for the exact commands app.py runs.
@@ -227,10 +256,17 @@ chmod 440 $SUDOERS_FILE
 # in an argument word) and both flavours error-recover past a bad sudoers.d
 # file, so breakage is otherwise silent. Fail loudly and leave sudo untouched.
 if ! visudo -cf $SUDOERS_FILE; then
-    rm -f $SUDOERS_FILE
-    error "sudoers policy failed visudo validation on this host's sudo — aborting"
+    if [ -n "$SUDOERS_PREV" ]; then
+        cp "$SUDOERS_PREV" "$SUDOERS_FILE"; chmod 440 "$SUDOERS_FILE"
+        error "sudoers policy failed visudo validation — previous policy restored, aborting"
+    else
+        rm -f $SUDOERS_FILE
+        error "sudoers policy failed visudo validation on this host's sudo — aborting"
+    fi
+    rm -f "$SUDOERS_PREV"
     exit 1
 fi
+rm -f "$SUDOERS_PREV"
 info "Sudoers configured at $SUDOERS_FILE (visudo-validated)"
 
 info "Installing disk-locate read helper..."
@@ -493,7 +529,7 @@ info "Installing caddy (reverse proxy) helper..."
 # Root-owned: validates a candidate Caddyfile with `caddy validate` BEFORE the
 # live file is touched, backs the previous one up, replaces it atomically, and
 # reloads caddy only when it is running (restoring the previous file if the
-# reload is refused, so file and running config never diverge). Also replaces
+# reload is refused, so file and running config never diverge). Also replaces/installs
 # cert/key pairs (validated + confined to /etc/caddy). NOT writable by dashboard.
 CADDY_HELPER="/usr/local/sbin/nexus-dashboard-caddy"
 cat > "$CADDY_HELPER" << 'HELPER'
@@ -510,6 +546,13 @@ cat > "$CADDY_HELPER" << 'HELPER'
 #          public-key comparison) before anything is written; owner/mode are
 #          preserved from the files being replaced; reload as above, restoring
 #          both files if it is refused.
+#   install <cert-path> <key-path>  (same stdin): create a NEW pair under
+#          /etc/caddy (root:caddy 0644/0640) — how the dashboard's own Cert
+#          Manager pair is handed to caddy, which cannot read the dashboard's
+#          0600 key in place. Create-only (existing targets refused — `cert`
+#          is the replace path); no reload (nothing references the files
+#          until a later apply).
+import grp
 import json
 import os
 import subprocess
@@ -581,41 +624,53 @@ def _confined(path):
     return rp if rp.startswith(CONFINE + os.sep) and rp != MANAGED else None
 
 
+def read_pair_stdin():
+    try:
+        data = json.loads(sys.stdin.read())
+        return data['cert'], data['key']
+    except (ValueError, KeyError, TypeError):
+        die('expected JSON {"cert": pem, "key": pem} on stdin', 2)
+
+
+def write_pair_tmps(cp, cert, kp, key, tmps):
+    """Write both PEMs to temp files beside their targets; returns
+    [(path, tmp), ...] in (cert, key) order."""
+    pairs = []
+    for path, content in ((cp, cert), (kp, key)):
+        fd, tmp = tempfile.mkstemp(prefix='.nexus-cert.',
+                                   dir=os.path.dirname(path))
+        tmps.append(tmp)
+        with os.fdopen(fd, 'w') as f:
+            f.write(content if content.endswith('\n') else content + '\n')
+        pairs.append((path, tmp))
+    return pairs
+
+
+def validate_pair(tc, tk):
+    def ossl(args):
+        return subprocess.run(['openssl'] + args, capture_output=True, text=True)
+    if ossl(['x509', '-in', tc, '-noout']).returncode != 0:
+        die('invalid certificate (openssl x509 rejected it)')
+    if ossl(['pkey', '-in', tk, '-noout']).returncode != 0:
+        die('invalid private key (openssl pkey rejected it)')
+    cpub = ossl(['x509', '-in', tc, '-noout', '-pubkey']).stdout.strip()
+    kpub = ossl(['pkey', '-in', tk, '-pubout']).stdout.strip()
+    if not cpub or cpub != kpub:
+        die('certificate and private key do not match')
+
+
 def do_cert(cert_path, key_path):
     cp, kp = _confined(cert_path), _confined(key_path)
     if not cp or not kp or cp == kp:
         die('cert/key must be two distinct files under %s' % CONFINE, 2)
     if not (os.path.isfile(cp) and os.path.isfile(kp)):
         die('replace-only: both target files must already exist', 2)
-    try:
-        data = json.loads(sys.stdin.read())
-        cert, key = data['cert'], data['key']
-    except (ValueError, KeyError, TypeError):
-        die('expected JSON {"cert": pem, "key": pem} on stdin', 2)
-
-    def ossl(args):
-        return subprocess.run(['openssl'] + args, capture_output=True, text=True)
-
+    cert, key = read_pair_stdin()
     prev = {}
-    pairs = []
     tmps = []
     try:
-        for path, content in ((cp, cert), (kp, key)):
-            fd, tmp = tempfile.mkstemp(prefix='.nexus-cert.',
-                                       dir=os.path.dirname(path))
-            tmps.append(tmp)
-            with os.fdopen(fd, 'w') as f:
-                f.write(content if content.endswith('\n') else content + '\n')
-            pairs.append((path, tmp))
-        tc, tk = pairs[0][1], pairs[1][1]
-        if ossl(['x509', '-in', tc, '-noout']).returncode != 0:
-            die('invalid certificate (openssl x509 rejected it)')
-        if ossl(['pkey', '-in', tk, '-noout']).returncode != 0:
-            die('invalid private key (openssl pkey rejected it)')
-        cpub = ossl(['x509', '-in', tc, '-noout', '-pubkey']).stdout.strip()
-        kpub = ossl(['pkey', '-in', tk, '-pubout']).stdout.strip()
-        if not cpub or cpub != kpub:
-            die('certificate and private key do not match')
+        pairs = write_pair_tmps(cp, cert, kp, key, tmps)
+        validate_pair(pairs[0][1], pairs[1][1])
         # Back up + preserve owner/mode of the files being replaced.
         for suffix, (path, tmp) in zip(('.crt', '.key'), pairs):
             st = os.stat(path)
@@ -645,15 +700,48 @@ def do_cert(cert_path, key_path):
     reload_if_active(restore)
 
 
+def do_install(cert_path, key_path):
+    cp, kp = _confined(cert_path), _confined(key_path)
+    if not cp or not kp or cp == kp:
+        die('cert/key must be two distinct files under %s' % CONFINE, 2)
+    if os.path.exists(cp) or os.path.exists(kp):
+        die('install is create-only: a target file already exists '
+            '(the cert action is the replace path)', 2)
+    cert, key = read_pair_stdin()
+    try:
+        gid = grp.getgrnam('caddy').gr_gid
+    except KeyError:
+        gid = 0   # no caddy group: root-only key; a later reload surfaces it
+    tmps = []
+    try:
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        os.makedirs(os.path.dirname(kp), exist_ok=True)
+        pairs = write_pair_tmps(cp, cert, kp, key, tmps)
+        validate_pair(pairs[0][1], pairs[1][1])
+        for mode, (path, tmp) in zip((0o644, 0o640), pairs):
+            os.chown(tmp, 0, gid)
+            os.chmod(tmp, mode)
+            os.replace(tmp, path)
+    finally:
+        for tmp in tmps:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    print('installed')
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == 'apply':
         do_apply()
     elif len(sys.argv) == 4 and sys.argv[1] == 'cert':
         do_cert(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) == 4 and sys.argv[1] == 'install':
+        do_install(sys.argv[2], sys.argv[3])
     else:
         die('usage: nexus-dashboard-caddy apply  (Caddyfile on stdin)\n'
             '       nexus-dashboard-caddy cert <cert-path> <key-path>  '
-            '(JSON {"cert","key"} PEMs on stdin)', 2)
+            '(JSON {"cert","key"} PEMs on stdin)\n'
+            '       nexus-dashboard-caddy install <cert-path> <key-path>  '
+            '(same stdin; create-only)', 2)
 
 
 if __name__ == '__main__':
@@ -1024,8 +1112,11 @@ chown $DASHBOARD_USER:$DASHBOARD_USER /var/log/nexus-dashboard
 info "Setting up dnsmasq (DNS & DHCP) module directories..."
 # The module is OFF by default; these dirs are its workspace when enabled. The
 # render tree is where dnsmasq reads config from (root) and writes leases to.
+# Chowned here (not only by the install-wide chown below) so --helpers-only
+# can create them on an upgraded node without leaving root-owned dirs behind.
 mkdir -p "$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d" "$DASHBOARD_DIR/dnsmasq/render/hosts.d" \
          "$DASHBOARD_DIR/dnsmasq/state" "$DASHBOARD_DIR/dnsmasq/leases"
+chown -R $DASHBOARD_USER:$DASHBOARD_USER "$DASHBOARD_DIR/dnsmasq"
 if command -v dnsmasq >/dev/null 2>&1; then
     mkdir -p /etc/dnsmasq.d
     cat > /etc/dnsmasq.d/zz-nexus-dashboard.conf << DROPIN
@@ -1051,6 +1142,12 @@ else
     warn "dnsmasq not installed — skipping the conf-dir drop-in. To use the DNS module later:"
     warn "  apt install dnsmasq, then create /etc/dnsmasq.d/zz-nexus-dashboard.conf with:"
     warn "    conf-dir=$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d,*.conf"
+fi
+
+if [ "$HELPERS_ONLY" = 1 ]; then
+    info "Helpers refresh complete — sudoers + root helpers + module prerequisites"
+    info "are current. App files, venv, module state, and services untouched."
+    exit 0
 fi
 
 info "Seeding default module state (fresh install only)..."

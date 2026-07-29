@@ -276,7 +276,10 @@ async function iscsiDoCreateTarget() {
 }
 
 async function iscsiCreateBackstore() {
-  const [disks, zvols] = await Promise.all([API.get('/api/disks'), API.get('/api/zfs/zvols')]);
+  const [disks, zvols] = await Promise.all([
+    API.get('/api/disks').catch(() => ({ devices: [] })),   // either module may be
+    API.get('/api/zfs/zvols').catch(() => []),              // disabled on this node
+  ]);
   const diskOpts = (disks.devices||[]).filter(d => d.type === 'disk').map(d =>
     `<option value="/dev/${d.name}">/dev/${d.name} (${d.size})</option>`
   ).join('');

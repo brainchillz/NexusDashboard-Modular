@@ -59,7 +59,9 @@ async function page_services() {
     API.get('/api/status'),
     API.get('/api/install/status').catch(() => null)
   ]);
-  let rows = Object.entries(status).map(([k, v]) => `
+  // A service whose module is toggled off on the Modules page is intentional —
+  // hide its row and keep it out of the "not installed" nag.
+  let rows = Object.entries(status).filter(([, v]) => !v.module_disabled).map(([k, v]) => `
     <tr>
       <td>${escapeHtml(v.name)}</td>
       <td>${install ? escapeHtml(install[k]?.package || '-') : '-'}</td>
@@ -76,7 +78,7 @@ async function page_services() {
       </td>
     </tr>
   `).join('');
-  let missing = install ? Object.entries(install).filter(([,v]) => !v.installed).length : 0;
+  let missing = install ? Object.entries(install).filter(([,v]) => !v.installed && !v.module_disabled).length : 0;
   $('page-content').innerHTML = `
     <h2>Service Manager</h2>
     ${missing > 0 ? `<div class="alert alert-warning">${missing} service(s) not installed. Run <code>sudo ./install-prerequisites.sh</code> on the host to install them.</div>` : ''}

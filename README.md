@@ -64,6 +64,19 @@ journalctl -u nexus-dashboard | grep -A2 'initial admin account'
 sudo -u dashboard /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py set-password admin
 ```
 
+**Upgrading an existing install?** After updating the application code, re-run
+the installer with `--helpers-only`:
+
+```bash
+sudo ./install.sh --helpers-only       # RHEL/Rocky: install-rhel.sh --helpers-only
+```
+
+Feature modules rely on root-owned helper scripts in `/usr/local/sbin` and a
+sudoers policy that code updates don't touch — this refreshes exactly those
+(idempotent; app files, venv, module state and the running service are left
+alone). Skipping it after an upgrade can leave a newly added module unable to
+apply changes because its helper is missing or outdated.
+
 Fresh installs are named **nexus-dashboard** throughout (`/opt/nexus-dashboard`,
 `nexus-dashboard.service` + timers, `/usr/local/sbin/nexus-dashboard-*` helpers).
 Nodes upgraded in place from the pre-merge apps keep their original names
@@ -102,7 +115,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 420 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 429 tests, no root/hardware needed
 ```
 
 ## Lineage
