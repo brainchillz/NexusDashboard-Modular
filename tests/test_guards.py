@@ -103,10 +103,12 @@ def test_user_role_and_hash_legacy_and_record():
     assert app._user_hash('pbkdf2:sha256:abc') == 'pbkdf2:sha256:abc'
     # Modern record.
     assert app._user_role({'role': 'readonly'}) == 'readonly'
-    assert app._user_role({'password': 'h'}) == 'admin'   # default when unset
+    # A dict without an explicit role now fails safe to readonly (real records
+    # always carry a role — bootstrap and user-create both set it).
+    assert app._user_role({'password': 'h'}) == 'readonly'
     assert app._user_hash({'password': 'h'}) == 'h'
-    # Missing record.
-    assert app._user_role(None) == 'admin'
+    # Missing record (deleted user) must NOT be admin — security fix 2026-07-29.
+    assert app._user_role(None) == 'readonly'
 
 
 def test_count_admins_mixes_legacy_and_records():

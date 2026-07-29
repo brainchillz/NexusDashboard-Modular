@@ -53,7 +53,7 @@ async function page_dnshosts() {
     <h2>DNS Overrides</h2>
     <h3>Host Records <span class="help">(name &rarr; A/AAAA, the dnsmasq hosts file)</span></h3>
     ${admin ? `<div class="toolbar"><button class="btn btn-sm" onclick="dmHostModal()">+ Add host record</button>
-      <button class="btn btn-sm btn-outline" onclick="dmImportModal()">&#8681; Import hosts file</button></div>` : ''}
+      <button class="btn btn-sm btn-outline" onclick="dmImportModal()">${icon('dl', 'ico-sm')} Import hosts file</button></div>` : ''}
     <table class="table"><thead><tr><th>Name</th><th>A</th><th>AAAA</th><th>State</th><th>Comment</th><th></th></tr></thead>
       <tbody>${rows('hosts', hostR) || '<tr><td colspan="6">No host records</td></tr>'}</tbody></table>
 

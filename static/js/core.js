@@ -41,6 +41,8 @@ const API = {
 function $(id) { return document.getElementById(id); }
 function showPage(id) { document.querySelectorAll('.nav-list a').forEach(a => a.classList.toggle('active', a.dataset.page === id)); renderPage(id); }
 function escapeHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+// Inline stroke icon from the symbol set in index.html (currentColor-inheriting).
+function icon(name, cls) { return `<svg class="ico ${cls || ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`; }
 // Escape a value for safe use as a single-quoted JS string inside a
 // double-quoted HTML attribute (e.g. onclick="fn('VALUE')").
 function jsArg(s) {

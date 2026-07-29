@@ -509,7 +509,7 @@ async function zfsPoolDetail(pool) {
     const pct = (u + a) > 0 ? (u / (u + a)) * 100 : 0;
     const enc = ds.encryption && ds.encryption !== 'off';
     const locked = ds.keystatus === 'unavailable';
-    const encBadge = enc ? ` <span class="status-badge ${locked ? 'red' : 'green'}" title="encryption: ${escapeHtml(ds.encryption)}">${locked ? '🔒 locked' : '🔓'}</span>` : '';
+    const encBadge = enc ? ` <span class="status-badge ${locked ? 'red' : 'green'}" title="encryption: ${escapeHtml(ds.encryption)}">${locked ? icon('lock', 'ico-sm') + ' locked' : icon('key', 'ico-sm')}</span>` : '';
     const keyBtn = enc ? (locked
       ? `<button class="btn btn-sm" onclick="zfsKeyLoad('${jsArg(ds.name)}')">Unlock</button>`
       : `<button class="btn btn-sm btn-outline" onclick="zfsKeyUnload('${jsArg(ds.name)}')">Lock</button>`) : '';
@@ -775,7 +775,7 @@ async function snapBrowse(snap, path) {
   const rows = (data.entries || []).map(e => {
     const child = path ? path + '/' + e.name : e.name;
     const name = e.type === 'dir'
-      ? `<a href="#" onclick="snapBrowse('${jsArg(snap)}','${jsArg(child)}');return false">&#128193; ${escapeHtml(e.name)}/</a>`
+      ? `<a href="#" onclick="snapBrowse('${jsArg(snap)}','${jsArg(child)}');return false">${icon('folder', 'ico-sm')} ${escapeHtml(e.name)}/</a>`
       : escapeHtml(e.name);
     return `<tr><td>${name}</td><td>${e.type === 'dir' ? '' : fmtBytes(e.size)}</td>
       <td><button class="btn btn-sm" onclick="snapRestore('${jsArg(snap)}','${jsArg(child)}')">Restore</button></td></tr>`;
