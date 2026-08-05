@@ -1,0 +1,60 @@
+# Reference declarative plugin: a WireGuard status page. Exercises every
+# contract point — a systemd service entry (Service Manager + /api/status
+# integration + dashboard card), a sudo command with an EXACT-pin sudoers
+# grant (see README.md), degradation when that grant is absent, an admin-only
+# action, and a journal tail. Adapt to another interface by replacing wg0
+# in the four places it appears.
+schema: 1
+id: wireguard
+label: WireGuard
+category: VPN
+min_app_version: "3.0.0"
+
+service:
+  unit: wg-quick@wg0
+  name: WireGuard (wg0)
+  binary: /usr/bin/wg
+dashboard_card: true
+
+pages:
+  - id: wireguard
+    label: WireGuard
+    widgets:
+      - type: service_status
+        title: Tunnel service
+
+      # `wg show <if> dump` is tab-separated BY CONTRACT (see wg(8)).
+      # skip_lines: 1 drops the interface line — it contains the interface
+      # PRIVATE KEY and must never be rendered. Peer-line fields:
+      #   0 public-key  1 preshared-key(SECRET - never map a column to it)
+      #   2 endpoint  3 allowed-ips  4 latest-handshake(epoch)
+      #   5 rx-bytes  6 tx-bytes  7 persistent-keepalive
+      - type: command_table
+        title: Peers
+        command: [wg, show, wg0, dump]
+        sudo: true
+        timeout: 10
+        refresh_seconds: 15
+        parse: {mode: tsv, skip_lines: 1}
+        columns:
+          - {title: Peer (public key), index: 0}
+          - {title: Endpoint, index: 2}
+          - {title: Allowed IPs, index: 3}
+          - {title: Last handshake, index: 4, transform: epoch_ago}
+          - {title: Received, index: 5, transform: human_bytes}
+          - {title: Sent, index: 6, transform: human_bytes}
+          - {title: Keepalive, index: 7}
+
+      - type: action_button
+        label: Restart WireGuard
+        command: [systemctl, restart, wg-quick@wg0]
+        sudo: true
+        confirm: true
+        danger: true
+
+      - type: log_tail
+        title: Journal
+        unit: wg-quick@wg0
+        lines: 100
+        refresh_seconds: 20
+        admin_only: true

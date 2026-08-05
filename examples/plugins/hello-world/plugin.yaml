@@ -1,0 +1,47 @@
+# Reference DECLARATIVE plugin — a complete dashboard page from one YAML
+# file: no Python, no build step. Install by copying this directory into the
+# dashboard's plugins/ directory and restarting the service; then enable it
+# on the Modules page. See PLUGINS.md for the full schema.
+schema: 1
+id: hello-world
+label: Hello World
+category: Examples
+min_app_version: "3.0.0"
+
+pages:
+  - id: hello-world          # same as the plugin id -> page keeps the bare id
+    label: Hello World
+    widgets:
+      - type: markdown
+        title: About this plugin
+        content: |
+          This is the reference **declarative plugin**: a single YAML file.
+          Copy the directory into `plugins/`, restart the dashboard, and
+          enable it on the Modules page; edit the YAML and restart to change
+          it.
+
+          Commands run server-side exactly as written in this file — the
+          dashboard never interpolates user input into them.
+
+      # `df -P` is universally present, needs no sudo, and has POSIX-stable
+      # columns. Its one caveat — mount points containing spaces shear the
+      # last column — is exactly the whitespace-mode limitation to know
+      # about; use `mode: tsv` or `mode: json_lines` for tools that offer
+      # machine-readable output.
+      - type: command_table
+        title: Filesystem usage (df -P -h)
+        command: [df, -P, -h]
+        sudo: false
+        refresh_seconds: 30
+        parse: {mode: whitespace, skip_lines: 1}
+        columns:
+          - {title: Filesystem, index: 0}
+          - {title: Size, index: 1}
+          - {title: Used, index: 2}
+          - {title: Available, index: 3}
+          - {title: "Use%", index: 4}
+          - {title: Mounted on, index: 5}
+
+      - type: link
+        label: Plugin documentation
+        url: https://example.com/nexus-dashboard/plugins

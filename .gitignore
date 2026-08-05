@@ -15,7 +15,7 @@ history.db
 certs/
 token
 *.tmp.*
-plugins/
+/plugins/
 
 # Python
 venv/
@@ -28,3 +28,4 @@ __pycache__/
 
 # Build output (packaging)
 dist/
+.server.pid
