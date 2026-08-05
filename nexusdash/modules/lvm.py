@@ -244,5 +244,7 @@ def lvm_lv_remove(vg, name):
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'lvm', 'label': 'LVM', 'category': 'Storage MGMT',
+MODULE = {'id': 'lvm', 'order': 30, 'label': 'LVM', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'lvm', 'label': 'LVM', 'icon': 'lay'}]},
           'blueprint': bp}

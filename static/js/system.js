@@ -89,6 +89,8 @@ async function page_services() {
   `;
 }
 
+// "My Account": change your own password — available to every user (incl.
+// read-only), which is why it's separate from the admin-only Users page.
 async function page_account() {
   $('page-content').innerHTML = `
     <h2>My Account</h2>
@@ -448,4 +450,173 @@ async function fwDeleteRule(number, to, action, from, confirmed) {
     if (!r.success) { alert(r.error || 'Failed'); return; }
   } catch (e) { alert(e.message); }
   page_firewall();
+}
+
+// ─── Moved from core.js (3.0.0 decluttering): tasks/logs/services/modules/audit/tls/users/tokens/notifications ───
+// core.js is now API/helpers/nav/modal/auth/dashboard-shell only;
+// module page logic lives with its page_* owner.
+
+async function taskRun(id) {
+  try { await API.post(`/api/tasks/${encodeURIComponent(id)}/run`, {}); setTimeout(page_tasks, 900); }
+  catch (e) { alert(e.message); }
+}
+
+// ─── Log viewer ─────────────────────────────────────────
+async function logsRefresh() {
+  const out = $('log-output');
+  if (!out) return;
+  const src = $('log-source').value, pri = $('log-priority').value;
+  const lines = $('log-lines').value, grep = $('log-grep').value.trim();
+  out.textContent = 'Loading…';
+  const qs = new URLSearchParams({ source: src, lines });
+  if (pri) qs.set('priority', pri);
+  if (grep) qs.set('grep', grep);
+  try {
+    const r = await API.get('/api/logs/query?' + qs.toString());
+    out.textContent = r.logs || 'No log entries.';
+    out.scrollTop = out.scrollHeight;
+  } catch (e) { out.textContent = 'Error: ' + e.message; }
+}
+
+async function svcAction(service, action) {
+  try {
+    await API.post(`/api/service/${service}/${action}`, {});
+    page_services();
+  } catch(e) { alert(e.message); }
+}
+
+async function svcLogs(service) {
+  try {
+    const r = await API.get(`/api/logs/${service}`);
+    openModal(`Logs: ${service}`, `<pre class="raw-output" style="max-height:500px;overflow:auto">${escapeHtml(r.logs || 'No logs')}</pre>`);
+  } catch(e) { alert(e.message); }
+}
+
+async function toggleModule(id, enabled) {
+  try {
+    await API.post('/api/modules', { id, enabled });
+    await applyModules();
+  } catch (e) {
+    alert(e.message);
+    page_modules();  // re-sync the switches with server state
+  }
+}
+
+async function auditRefresh() {
+  const el = $('audit-body');
+  if (!el) return;
+  let data;
+  try { data = await API.get('/api/audit?limit=200'); }
+  catch(e) { el.innerHTML = `<p class="help">Could not load audit log: ${escapeHtml(e.message)}</p>`; return; }
+  const entries = data.entries || [];
+  if (!entries.length) { el.innerHTML = '<p class="help">No audit entries yet.</p>'; return; }
+  const badge = r => r === 'ok' ? 'green' : (r === 'denied' ? 'yellow' : 'gray');
+  const rows = entries.map(e => {
+    const tgt = (e.target && Object.keys(e.target).length) ? ' ' + JSON.stringify(e.target) : '';
+    return `<tr>
+      <td><code>${escapeHtml(e.ts || '-')}</code></td>
+      <td>${escapeHtml(e.user || '-')}</td>
+      <td>${escapeHtml(e.ip || '-')}</td>
+      <td><code>${escapeHtml(e.method || '')} ${escapeHtml(e.path || '')}${escapeHtml(tgt)}</code></td>
+      <td><span class="status-badge ${badge(e.result)}">${escapeHtml(e.result || '')} ${e.status || ''}</span></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="table">
+      <thead><tr><th>Time</th><th>User</th><th>IP</th><th>Action</th><th>Result</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function tlsUploadCert() {
+  const cert = $('tls-cert').value.trim();
+  const key = $('tls-key').value.trim();
+  if (!cert || !key) { alert('Paste both the certificate and the private key'); return; }
+  try {
+    const r = await API.post('/api/tls/cert', { cert, key });
+    if (r.success) alert('Certificate saved. Restart the dashboard service on this node to apply it.');
+    page_certificate();
+  } catch(e) { alert(e.message); }
+}
+
+async function tlsRegenerate() {
+  if (!confirm('Generate a new self-signed certificate? This replaces the current one.')) return;
+  try {
+    const r = await API.post('/api/tls/regenerate', {});
+    if (r.success) alert('New self-signed certificate generated. Restart the dashboard service on this node to apply it.');
+    page_certificate();
+  } catch(e) { alert(e.message); }
+}
+
+async function userDoCreate() {
+  const username = $('nu-name').value.trim(), password = $('nu-pass').value, role = $('nu-role').value, smb = $('nu-smb').checked;
+  if (!username || !password) { alert('Username and password required'); return; }
+  try {
+    const r = await API.post('/api/users', { username, password, role, smb });
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+    closeModal(); page_users();
+  } catch(e) { alert(e.message); }
+}
+async function userSetRole(username, role) {
+  if (!confirm(`Change ${username} to ${role}?`)) return;
+  try { const r = await API.post(`/api/users/${encodeURIComponent(username)}/role`, { role }); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
+}
+async function userDoPassword(username) {
+  const password = $('up-pass').value;
+  if (!password) { alert('Password required'); return; }
+  try { const r = await API.post(`/api/users/${encodeURIComponent(username)}/password`, { password }); if (!r.success) { alert(r.error || 'Failed'); return; } closeModal(); alert('Password updated.'); } catch(e) { alert(e.message); }
+}
+async function userDelete(username) {
+  if (!confirm(`Delete dashboard user "${username}"?`)) return;
+  try { const r = await API.delete(`/api/users/${encodeURIComponent(username)}`); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
+}
+
+// ─── API tokens ─────────────────────────────────────────
+async function tokenDoCreate() {
+  const name = $('tk-name').value.trim();
+  const role = $('tk-role').value;
+  if (!name) { alert('Name required'); return; }
+  try {
+    const r = await API.post('/api/tokens', { name, role });
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+    openModal('Token created — copy it now', `
+      <div class="alert alert-warning"><strong>This is shown only once.</strong> Store it somewhere safe;
+        it can't be retrieved again (only revoked).</div>
+      <div class="form-group"><label>Token for <strong>${escapeHtml(r.name)}</strong> (${escapeHtml(r.role)})</label>
+        <textarea class="form-control" rows="2" readonly onclick="this.select()">${escapeHtml(r.token)}</textarea></div>
+      <p class="help">Use it as a header: <code>Authorization: Bearer ${escapeHtml(r.token)}</code></p>
+      <button class="btn" onclick="closeModal(); page_users();">Done</button>`);
+  } catch(e) { alert(e.message); }
+}
+
+async function tokenDelete(id, name) {
+  if (!confirm(`Revoke API token "${name}"? Any script using it will stop working.`)) return;
+  try { const r = await API.delete(`/api/tokens/${encodeURIComponent(id)}`); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
+}
+
+// ─── Notifications ──────────────────────────────────────
+async function notifSave() {
+  const body = {
+    email: {
+      enabled: $('nf-email-en').checked, host: $('nf-host').value.trim(),
+      port: parseInt($('nf-port').value) || 587, security: $('nf-sec').value,
+      username: $('nf-user').value.trim(), password: $('nf-pass').value,
+      from: $('nf-from').value.trim(), to: $('nf-to').value.trim(),
+    },
+    webhook: { enabled: $('nf-web-en').checked, url: $('nf-url').value.trim() },
+  };
+  try {
+    const r = await API.post('/api/notifications', body);
+    if (!r.success) { alert(r.error || 'Failed'); return; }
+    $('nf-result').innerHTML = '<span style="color:#6c6">✓ Saved.</span>';
+  } catch(e) { alert(e.message); }
+}
+
+async function notifTest() {
+  $('nf-result').textContent = 'Sending test (using the last saved config)…';
+  try {
+    const r = await API.post('/api/notifications/test', {});
+    if (r.success) { $('nf-result').innerHTML = '<span style="color:#6c6">✓ Test sent.</span>'; return; }
+    const detail = (r.results || []).map(x => `${x.channel}: ${x.ok ? 'ok' : escapeHtml(x.error)}`).join(' · ');
+    $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(detail || r.error || 'failed')}</span>`;
+  } catch(e) { $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(e.message)}</span>`; }
 }

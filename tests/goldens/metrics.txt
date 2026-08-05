@@ -1,0 +1,55 @@
+# HELP storagedash_up Dashboard is up
+# TYPE storagedash_up gauge
+storagedash_up 1
+# HELP storagedash_uptime_seconds Host uptime in seconds
+# TYPE storagedash_uptime_seconds gauge
+storagedash_uptime_seconds 4242
+# HELP storagedash_load1 1-minute load average
+# TYPE storagedash_load1 gauge
+storagedash_load1 0.5
+# HELP storagedash_load5 5-minute load average
+# TYPE storagedash_load5 gauge
+storagedash_load5 0.25
+# HELP storagedash_load15 15-minute load average
+# TYPE storagedash_load15 gauge
+storagedash_load15 0.125
+# HELP storagedash_cpu_count Logical CPU count
+# TYPE storagedash_cpu_count gauge
+storagedash_cpu_count 4
+# HELP storagedash_cpu_usage_percent CPU busy percent
+# TYPE storagedash_cpu_usage_percent gauge
+storagedash_cpu_usage_percent 12.5
+# HELP storagedash_memory_total_bytes Total RAM
+# TYPE storagedash_memory_total_bytes gauge
+storagedash_memory_total_bytes 8589934592
+# HELP storagedash_memory_available_bytes Available RAM
+# TYPE storagedash_memory_available_bytes gauge
+storagedash_memory_available_bytes 6442450944
+# HELP storagedash_memory_used_bytes Used RAM
+# TYPE storagedash_memory_used_bytes gauge
+storagedash_memory_used_bytes 2147483648
+# HELP storagedash_swap_total_bytes Total swap
+# TYPE storagedash_swap_total_bytes gauge
+storagedash_swap_total_bytes 1073741824
+# HELP storagedash_swap_used_bytes Used swap
+# TYPE storagedash_swap_used_bytes gauge
+storagedash_swap_used_bytes 0
+# HELP storagedash_service_up systemd service active (1) or not (0)
+# TYPE storagedash_service_up gauge
+storagedash_service_up{service="zfs"} 0
+storagedash_service_up{service="iscsi"} 0
+storagedash_service_up{service="nfs"} 0
+storagedash_service_up{service="smb"} 0
+storagedash_service_up{service="llamacpp"} 0
+storagedash_service_up{service="minidlna"} 0
+storagedash_service_up{service="caddy"} 0
+storagedash_service_up{service="dnsmasq"} 0
+storagedash_service_up{service="docker"} 0
+storagedash_service_up{service="firewall"} 0
+storagedash_service_up{service="instances"} 0
+# HELP storagedash_nfs_exports Configured NFS exports
+# TYPE storagedash_nfs_exports gauge
+storagedash_nfs_exports 0
+# HELP storagedash_smb_shares Configured SMB shares
+# TYPE storagedash_smb_shares gauge
+storagedash_smb_shares 0

@@ -484,5 +484,11 @@ def caddy_cert_replace():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'caddy', 'label': 'Caddy Proxy', 'category': 'Web',
-          'blueprint': bp}
+MODULE = {'id': 'caddy', 'order': 210, 'label': 'Caddy Proxy', 'category': 'Web',
+          'nav': {'cat': 'web', 'cat_order': 70, 'pages': [
+                  {'id': 'caddy', 'label': 'Caddy Proxy', 'icon': 'link',
+                   'admin_only': True}]},
+          'blueprint': bp,
+          # Reverse-proxy front door — absent on most nodes by design (alert=False).
+          'services': {'caddy': {'name': 'Caddy', 'service': 'caddy', 'pkg': 'caddy',
+                                 'binary': '/usr/bin/caddy', 'alert': False}}}

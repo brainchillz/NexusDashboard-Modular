@@ -39,7 +39,8 @@ const API = {
 };
 
 function $(id) { return document.getElementById(id); }
-function showPage(id) { document.querySelectorAll('.nav-list a').forEach(a => a.classList.toggle('active', a.dataset.page === id)); renderPage(id); }
+let currentPage = 'dashboard';   // survives nav re-renders (active-link restore)
+function showPage(id) { currentPage = id; document.querySelectorAll('.nav-list a').forEach(a => a.classList.toggle('active', a.dataset.page === id)); renderPage(id); }
 function escapeHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 // Inline stroke icon from the symbol set in index.html (currentColor-inheriting).
 function icon(name, cls) { return `<svg class="ico ${cls || ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`; }
@@ -130,8 +131,14 @@ async function confirmNameGo(name) {
 }
 
 // ─── Navigation ─────────────────────────────────────────
-document.querySelectorAll('.nav-list a').forEach(a => {
-  a.addEventListener('click', e => { e.preventDefault(); showPage(a.dataset.page); });
+// The sidebar is rendered at runtime from /api/modules/nav (renderNav below),
+// so clicks are DELEGATED on the <ul> — it exists (empty) at parse time,
+// while the <a> elements don't yet.
+document.querySelector('.nav-list').addEventListener('click', e => {
+  const a = e.target.closest('a[data-page]');
+  if (!a) return;
+  e.preventDefault();
+  showPage(a.dataset.page);
 });
 
 function toggleCat(cat) {
@@ -154,44 +161,176 @@ function restoreNavCats() {
     });
   } catch (e) {}
 }
-restoreNavCats();
 
-// ─── Feature modules (nav visibility) ───────────────────
-// Disabled modules are hidden from the left nav. State is global (set by an
-// admin on the Modules page) and applied on every load for all users.
-let moduleEnabled = {};  // id -> bool
-async function applyModules() {
-  try {
-    const r = await API.get('/api/modules');
-    moduleEnabled = {};
-    (r.modules || []).forEach(m => {
-      moduleEnabled[m.id] = m.enabled;
-      const a = document.querySelector(`.nav-list a[data-page="${m.id}"]`);
-      if (a && a.parentElement) a.parentElement.classList.toggle('module-hidden', !m.enabled);
-      // Multi-page modules (one toggle, several nav entries) mark each <li>
-      // with data-module=<id> since data-page != the module id.
-      document.querySelectorAll(`.nav-list li[data-module="${m.id}"]`).forEach(
-        li => li.classList.toggle('module-hidden', !m.enabled));
-    });
-    // Hide a whole nav group (e.g. "Sharing") when every item in it is hidden.
-    const readonly = document.body.classList.contains('readonly');
-    document.querySelectorAll('.nav-group').forEach(g => {
-      const anyVisible = Array.from(g.querySelectorAll('.nav-sub > li')).some(li =>
-        !li.classList.contains('module-hidden') &&
-        !(readonly && li.classList.contains('nav-admin-only')));
-      g.classList.toggle('group-hidden', !anyVisible);
-    });
-    // If the page currently in view just got disabled, fall back to the dashboard.
-    const active = document.querySelector('.nav-list a.active');
-    if (active) {
-      const mod = active.parentElement && active.parentElement.dataset.module;
-      if (moduleEnabled[active.dataset.page] === false ||
-          (mod && moduleEnabled[mod] === false)) showPage('dashboard');
-    }
-  } catch (e) {}
+// Manifest strings are third-party input once plugins exist: identifiers are
+// allowlist-validated before ANY interpolation into selectors/attributes/
+// onclick; free text (labels) always goes through escapeHtml.
+const NAV_ID_RE = /^[A-Za-z0-9_-]+$/;
+const PAGE_ID_RE = /^[A-Za-z0-9_-]+$/;     // becomes part of window['page_<id>']
+                                           // (computed property: '-' is fine)
+const SVG_PATH_RE = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/;  // path data only
+
+function navIcon(it) {
+  if (typeof it.icon === 'string' && NAV_ID_RE.test(it.icon) &&
+      document.getElementById('i-' + it.icon))
+    return `<svg class="ico"><use href="#i-${it.icon}"/></svg>`;
+  // Plugins without a stock sprite icon supply raw path data (d= only — the
+  // charset allowlist forecloses attribute breakout; path data can't script).
+  if (Array.isArray(it.icon_paths) && it.icon_paths.length &&
+      it.icon_paths.every(d => typeof d === 'string' && SVG_PATH_RE.test(d)))
+    return `<svg class="ico" viewBox="0 0 24 24">${it.icon_paths.map(d => `<path d="${d}"/>`).join('')}</svg>`;
+  return `<svg class="ico"><use href="#i-pkg"/></svg>`;
 }
 
+// Render the whole sidebar from the nav manifest. Emits the exact DOM shape
+// of the old static nav (classes/attributes) so style.css and the
+// module-visibility selectors work unchanged. The Dashboard link is
+// renderer-emitted, not manifest data — a broken manifest can never remove
+// the one guaranteed page.
+function renderNav(nav) {
+  const ul = document.querySelector('.nav-list');
+  const cats = ((nav && nav.categories) || []).slice()
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  let html = `<li><a href="#" data-page="dashboard"><svg class="ico"><use href="#i-grid"/></svg> Dashboard</a></li>`;
+  for (const c of cats) {
+    if (!NAV_ID_RE.test(String(c.cat || ''))) continue;
+    const items = (c.items || []).filter(it =>
+      PAGE_ID_RE.test(String(it.page || '')) &&
+      (!it.module || NAV_ID_RE.test(String(it.module))));
+    if (!items.length) continue;
+    const lis = items.map(it =>
+      `<li${it.admin_only ? ' class="nav-admin-only"' : ''}${
+         it.module && it.module !== it.page ? ` data-module="${it.module}"` : ''
+       }><a href="#" data-page="${it.page}">${navIcon(it)} ${escapeHtml(it.label || it.page)}</a></li>`
+    ).join('');
+    html += `<li class="nav-group" data-cat="${c.cat}">` +
+      `<div class="nav-cat" onclick="toggleCat('${c.cat}')">${escapeHtml(c.label || c.cat)} <span class="caret">▾</span></div>` +
+      `<ul class="nav-sub">${lis}</ul></li>`;
+  }
+  ul.innerHTML = html;
+  restoreNavCats();   // re-apply persisted collapsed state to the fresh groups
+  document.querySelectorAll('.nav-list a').forEach(a =>
+    a.classList.toggle('active', a.dataset.page === currentPage));
+}
+
+// ─── Feature modules (nav + visibility orchestration) ───
+// applyModules() is the UI-manifest orchestrator: fetch /api/modules/nav
+// (cache the last good manifest — a fetch failure must not brick the nav),
+// render the sidebar, hand plugin assets / declarative pages to their
+// loaders (later script files; typeof-guarded), then apply module
+// visibility. Runs once at login (before the first page renders) and again
+// on every Modules-page toggle.
+let moduleEnabled = {};  // id -> bool (enabled AND installed)
+let uiManifest = null;
+async function applyModules() {
+  let man = null;
+  try {
+    man = await API.get('/api/modules/nav');
+    try { localStorage.setItem('uiManifest.v1', JSON.stringify(man)); } catch (e) {}
+  } catch (e) {
+    try { man = JSON.parse(localStorage.getItem('uiManifest.v1') || 'null'); } catch (e2) {}
+  }
+  if (!man) {   // no server, no cache: minimal shell + visible error
+    renderNav({ categories: [] });
+    $('page-content').innerHTML =
+      '<div class="error">Could not load the module list — navigation is unavailable. Reload to retry.</div>';
+    return;
+  }
+  uiManifest = man;
+  renderNav(man.nav);
+  if (typeof loadPluginAssets === 'function') loadPluginAssets(man.modules);
+  if (typeof registerDeclarativePages === 'function') registerDeclarativePages(man.modules);
+  applyModuleVisibility(man.modules || []);
+}
+
+// ─── Plugin asset delivery ──────────────────────────────
+// Plugin JS/CSS arrive as appended classic <script>/<link> tags (no build
+// step, no ES modules — a parse error in one plugin file kills only that
+// file). Safe because window['page_<id>'] is resolved lazily at click time:
+// a plugin script only has to have PARSED before its page is first opened,
+// and injection starts before the dashboard (always the first page) renders.
+const _loadedAssets = new Set();
+let _pendingScripts = 0;
+
+function _assetUrlOk(u) {   // same-origin absolute paths only
+  return typeof u === 'string' && u.startsWith('/') && !u.startsWith('//');
+}
+
+function loadPluginAssets(mods) {
+  (mods || []).forEach(m => {
+    if (!m.assets || m.enabled === false || m.installed === false) return;
+    (m.assets.css || []).forEach(u => {
+      if (!_assetUrlOk(u) || _loadedAssets.has(u)) return;
+      _loadedAssets.add(u);
+      const l = document.createElement('link');
+      l.rel = 'stylesheet'; l.href = u;
+      document.head.appendChild(l);
+    });
+    (m.assets.js || []).forEach(u => {
+      if (!_assetUrlOk(u) || _loadedAssets.has(u)) return;
+      _loadedAssets.add(u);
+      _pendingScripts++;
+      const s = document.createElement('script');
+      s.src = u;
+      s.async = false;    // preserves order among a plugin's own files
+      s.onload = s.onerror = ev => {
+        _pendingScripts--;
+        if (ev.type === 'error') console.warn('plugin asset failed:', u);
+        // If the user beat the script to its own page, re-render it now.
+        if (document.querySelector('#page-content .plugin-wait') &&
+            typeof window['page_' + currentPage] === 'function') renderPage(currentPage);
+      };
+      document.body.appendChild(s);
+    });
+  });
+}
+
+function applyModuleVisibility(mods) {
+  moduleEnabled = {};
+  mods.forEach(m => {
+    if (!NAV_ID_RE.test(String(m.id || ''))) return;
+    // Not-installed (a plugin whose load failed / dir removed) hides from nav
+    // exactly like disabled; the Modules page shows the distinct third state.
+    const hidden = m.enabled === false || m.installed === false;
+    moduleEnabled[m.id] = m.enabled !== false && m.installed !== false;
+    const a = document.querySelector(`.nav-list a[data-page="${m.id}"]`);
+    if (a && a.parentElement) a.parentElement.classList.toggle('module-hidden', hidden);
+    // Multi-page modules (one toggle, several nav entries) mark each <li>
+    // with data-module=<id> since data-page != the module id.
+    document.querySelectorAll(`.nav-list li[data-module="${m.id}"]`).forEach(
+      li => li.classList.toggle('module-hidden', hidden));
+  });
+  // Hide a whole nav group (e.g. "Sharing") when every item in it is hidden.
+  const readonly = document.body.classList.contains('readonly');
+  document.querySelectorAll('.nav-group').forEach(g => {
+    const anyVisible = Array.from(g.querySelectorAll('.nav-sub > li')).some(li =>
+      !li.classList.contains('module-hidden') &&
+      !(readonly && li.classList.contains('nav-admin-only')));
+    g.classList.toggle('group-hidden', !anyVisible);
+  });
+  // If the page currently in view just got disabled, fall back to the dashboard.
+  const active = document.querySelector('.nav-list a.active');
+  if (active) {
+    const mod = active.parentElement && active.parentElement.dataset.module;
+    if (moduleEnabled[active.dataset.page] === false ||
+        (mod && moduleEnabled[mod] === false)) showPage('dashboard');
+  }
+  // A page whose nav entry AND page function both vanished (plugin removed
+  // server-side between manifests) also falls back.
+  if (currentPage !== 'dashboard' &&
+      !document.querySelector(`.nav-list a[data-page="${currentPage}"]`) &&
+      typeof window['page_' + currentPage] !== 'function') showPage('dashboard');
+}
+
+let _renderSeq = 0;   // bumps per navigation; slow async pages check it
+                      // before writing so a stale render can't clobber the
+                      // page the user has since navigated to
+let _pageCleanup = null;   // per-page teardown (widget refresh timers, …) —
+                           // the page-level twin of _onModalClose
 async function renderPage(page) {
+  _renderSeq++;
+  const cleanup = _pageCleanup; _pageCleanup = null;
+  if (cleanup) try { cleanup(); } catch (e) {}
   $('page-content').innerHTML = '<div class="loading">Loading...</div>';
   // Reset scroll: .content scrolls independently, and the window itself
   // scrolls when the sidebar is taller than the viewport — reset both, or a
@@ -201,6 +340,10 @@ async function renderPage(page) {
   window.scrollTo(0, 0);
   try {
     if (typeof window['page_' + page] === 'function') await window['page_' + page]();
+    else if (_pendingScripts > 0)
+      // a plugin script that defines this page may still be parsing; its
+      // onload handler re-renders when it lands
+      $('page-content').innerHTML = '<div class="loading plugin-wait">Loading plugin…</div>';
     else $('page-content').innerHTML = '<h2>Page not found</h2>';
   } catch(e) {
     $('page-content').innerHTML = `<div class="error">Error: ${escapeHtml(e.message)}</div>`;
@@ -286,20 +429,159 @@ async function fillResourceSparks() {
   }
 }
 
-// Lazily fill ZFS pool "full in ~N days" notes from the forecast endpoint.
-async function fillPoolForecasts(pools) {
-  for (const p of (pools || [])) {
-    const el = document.getElementById('fc-' + p.name);
-    if (!el) continue;
-    try {
-      const f = await API.get(`/api/history/forecast?label=${encodeURIComponent(p.name)}`);
-      if (f.days_to_full != null) el.textContent = `~${f.days_to_full}d to full`;
-      else if (f.fill_rate_bytes_per_day > 0) el.textContent = 'filling';
-    } catch (e) {}
+
+// ─── Dashboard cards ────────────────────────────────────
+// A module contributes a card by defining a global `dashcard_<id>(ctx)`
+// returning an HTML string ('' = no card this render) — the same
+// name-convention-resolved-lazily idiom as page_*. ctx: {s (the /api/summary
+// payload), svc, dot}. Declarative plugins with no JS get a card from their
+// manifest's dashboard_card instead (rendered by widgets.js).
+// BUILTIN_CARD_ORDER is ordering data, not wiring — plugin cards need no
+// edit here; they append after, in manifest order.
+const BUILTIN_CARD_ORDER = ['zfs', 'iscsi', 'nfs', 'smb', 'disks',
+                            'llamacpp', 'gpu', 'minidlna'];
+
+function dashcard_zfs(ctx) {
+  const z = ctx.s.zfs || {}, dot = ctx.dot;
+  return `
+    <div class="card card-link" onclick="showPage('zfs')">
+      <div class="card-head"><span class="status-dot ${z.online ? dot('zfs') : 'red'}"></span>ZFS Pools</div>
+      <div class="card-value">${z.pools || 0} <span class="card-unit">pool${z.pools === 1 ? '' : 's'}</span></div>
+      <div class="card-sub">${escapeHtml(z.used || '0')} / ${escapeHtml(z.size || '0')}${z.scanning ? ' · scrubbing' : ''}</div>
+      ${z.pools ? usageBar(z.pct || 0) : ''}
+    </div>`;
+}
+
+function dashcard_iscsi(ctx) {
+  const isc = ctx.s.iscsi || {}, dot = ctx.dot;
+  return `
+    <div class="card card-link" onclick="showPage('iscsi')">
+      <div class="card-head"><span class="status-dot ${dot('iscsi')}"></span>iSCSI</div>
+      <div class="card-value">${isc.targets || 0} <span class="card-unit">target${isc.targets === 1 ? '' : 's'}</span></div>
+      <div class="card-sub">${isc.luns || 0} LUNs · ${isc.sessions || 0} connected</div>
+      <div class="card-sub">${escapeHtml(isc.provisioned || '0B')} provisioned</div>
+    </div>`;
+}
+
+function dashcard_nfs(ctx) {
+  const nf = ctx.s.nfs || {}, dot = ctx.dot;
+  return `
+    <div class="card card-link" onclick="showPage('nfs')">
+      <div class="card-head"><span class="status-dot ${dot('nfs')}"></span>NFS</div>
+      <div class="card-value">${nf.exports || 0} <span class="card-unit">export${nf.exports === 1 ? '' : 's'}</span></div>
+      <div class="card-sub">${nf.clients || 0} client mount${nf.clients === 1 ? '' : 's'}</div>
+    </div>`;
+}
+
+function dashcard_smb(ctx) {
+  const sm = ctx.s.smb || {}, dot = ctx.dot;
+  return `
+    <div class="card card-link" onclick="showPage('smb')">
+      <div class="card-head"><span class="status-dot ${dot('smb')}"></span>SMB</div>
+      <div class="card-value">${sm.shares || 0} <span class="card-unit">share${sm.shares === 1 ? '' : 's'}</span></div>
+      <div class="card-sub">${sm.users || 0} users · ${sm.connections || 0} connections</div>
+    </div>`;
+}
+
+function dashcard_disks(ctx) {
+  const dk = ctx.s.disks || {};
+  const smartLabel = dk.smart_ok === false ? 'SMART FAIL' : (dk.smart_ok === null ? 'SMART n/a' : 'SMART OK');
+  return `
+    <div class="card card-link" onclick="showPage('disks')">
+      <div class="card-head"><span class="status-dot ${dk.smart_ok === false ? 'red' : 'green'}"></span>Disks</div>
+      <div class="card-value">${dk.total || 0} <span class="card-unit">disks</span></div>
+      <div class="card-sub">${dk.free || 0} free · ${smartLabel}</div>
+    </div>`;
+}
+
+// llama.cpp health/metrics card. Fetched separately (it pings llama-server's
+// /health + /metrics) so /api/summary stays cheap and nothing runs when the
+// module is off (collectDashboardCards skips disabled modules' cards).
+async function dashcard_llamacpp() {
+  let lh = null;
+  try { lh = await API.get('/api/llama/health'); } catch (e) {}
+  const up = !!(lh && lh.ok);
+  const m = (lh && lh.metrics) || {};
+  const bits = [];
+  if (up) {
+    bits.push(escapeHtml(lh.status || 'ok'));
+    if (m.kv_cache_usage_ratio != null) bits.push(`KV ${Math.round(m.kv_cache_usage_ratio * 100)}%`);
+    if (m.requests_processing != null) bits.push(`${m.requests_processing} active`);
+    if (lh.tokens_per_sec != null) bits.push(`${lh.tokens_per_sec} tok/s`);
   }
+  return `
+    <div class="card card-link" onclick="showPage('llamacpp')">
+      <div class="card-head"><span class="status-dot ${up ? 'green' : 'red'}"></span>llama.cpp</div>
+      <div class="card-value">${up ? 'up' : 'down'}</div>
+      <div class="card-sub">${up ? bits.join(' · ') : 'server not responding'}</div>
+      ${up && m.tokens_predicted_total != null ? `<div class="card-sub">${m.tokens_predicted_total} tokens generated</div>` : ''}
+    </div>`;
+}
+
+// GPU card — only when tooling is present ('' otherwise). Fetched separately
+// (nvidia-smi/rocm-smi) so /api/summary stays cheap on GPU-less hosts.
+async function dashcard_gpu() {
+  let gpu = null;
+  try { gpu = await API.get('/api/gpu'); } catch (e) {}
+  if (!(gpu && gpu.available && (gpu.gpus || []).length)) return '';
+  const g0 = gpu.gpus[0], n = gpu.gpus.length;
+  const bits = [];
+  if (g0.mem_pct != null) bits.push(`${Math.round(g0.mem_pct)}% VRAM`);
+  if (g0.temp != null) bits.push(`${Math.round(g0.temp)}°C`);
+  if (g0.power != null) bits.push(`${Math.round(g0.power)}W`);
+  return `
+    <div class="card card-link" onclick="showPage('gpu')">
+      <div class="card-head"><span class="status-dot green"></span>GPU</div>
+      <div class="card-value">${g0.util != null ? Math.round(g0.util) : 0}<span class="card-unit">% util</span></div>
+      ${usageBar(g0.util || 0)}
+      <div class="card-sub">${escapeHtml(g0.name || 'GPU')}${n > 1 ? ` +${n - 1} more` : ''}</div>
+      <div class="card-sub">${bits.join(' · ')}</div>
+    </div>`;
+}
+
+// DLNA Media card. Media-library counts are fetched separately (reads
+// minidlna's files.db) so /api/summary stays cheap.
+async function dashcard_minidlna(ctx) {
+  const svc = ctx.svc, dot = ctx.dot;
+  const up = svc.minidlna && svc.minidlna.active === 'active';
+  let lib = null;
+  try { lib = (await API.get('/api/minidlna/stats')).library; } catch (e) {}
+  const has = lib && lib.available;
+  return `
+    <div class="card card-link" onclick="showPage('minidlna')">
+      <div class="card-head"><span class="status-dot ${up ? dot('minidlna') : 'red'}"></span>DLNA Media</div>
+      <div class="card-value">${has ? Number(lib.objects || 0).toLocaleString() : (up ? 'up' : 'down')}${has ? ' <span class="card-unit">items</span>' : ''}</div>
+      <div class="card-sub">${has ? `${Number(lib.audio || 0).toLocaleString()} audio · ${Number(lib.video || 0).toLocaleString()} video · ${Number(lib.image || 0).toLocaleString()} image` : 'MiniDLNA media server'}</div>
+      ${has ? `<div class="card-sub">${fmtBytesIEC(lib.size)} database</div>` : ''}
+    </div>`;
+}
+
+async function collectDashboardCards(ctx) {
+  const ids = BUILTIN_CARD_ORDER.slice();
+  ((uiManifest && uiManifest.modules) || []).forEach(m => {
+    if (!ids.includes(m.id) &&
+        (typeof window['dashcard_' + m.id] === 'function' || m.dashboard_card))
+      ids.push(m.id);
+  });
+  const out = [];
+  for (const id of ids) {
+    if (moduleEnabled[id] === false) continue;   // disabled module: no card
+    try {
+      const fn = window['dashcard_' + id];
+      let html = '';
+      if (typeof fn === 'function') html = await fn(ctx);
+      else if (typeof renderDeclarativeCard === 'function') {
+        const m = ((uiManifest && uiManifest.modules) || []).find(x => x.id === id);
+        if (m && m.dashboard_card) html = await renderDeclarativeCard(m.id, m.dashboard_card, ctx);
+      }
+      if (html) out.push(html);
+    } catch (e) {}   // one bad card must never blank the dashboard
+  }
+  return out;
 }
 
 async function page_dashboard() {
+  const seq = _renderSeq;
   const [s, res] = await Promise.all([
     API.get('/api/summary'),
     API.get('/api/system/resources').catch(() => null),
@@ -307,7 +589,7 @@ async function page_dashboard() {
   const svc = s.services || {};
   const dot = k => (svc[k] && svc[k].active === 'active') ? 'green' : 'red';
   const sys = s.system || {};
-  const z = s.zfs || {}, isc = s.iscsi || {}, nf = s.nfs || {}, sm = s.smb || {}, dk = s.disks || {};
+  const z = s.zfs || {};
   const alerts = s.alerts || [];
 
   const health = alerts.length
@@ -327,109 +609,13 @@ async function page_dashboard() {
       </div>
     </div>` : '';
 
-  const smartLabel = dk.smart_ok === false ? 'SMART FAIL' : (dk.smart_ok === null ? 'SMART n/a' : 'SMART OK');
-
-  // One card per service module; only render those whose module is enabled
-  // (a module is treated as enabled unless explicitly disabled).
-  const cardDefs = [
-    { id: 'zfs', html: `
-    <div class="card card-link" onclick="showPage('zfs')">
-      <div class="card-head"><span class="status-dot ${z.online ? dot('zfs') : 'red'}"></span>ZFS Pools</div>
-      <div class="card-value">${z.pools || 0} <span class="card-unit">pool${z.pools === 1 ? '' : 's'}</span></div>
-      <div class="card-sub">${escapeHtml(z.used || '0')} / ${escapeHtml(z.size || '0')}${z.scanning ? ' · scrubbing' : ''}</div>
-      ${z.pools ? usageBar(z.pct || 0) : ''}
-    </div>` },
-    { id: 'iscsi', html: `
-    <div class="card card-link" onclick="showPage('iscsi')">
-      <div class="card-head"><span class="status-dot ${dot('iscsi')}"></span>iSCSI</div>
-      <div class="card-value">${isc.targets || 0} <span class="card-unit">target${isc.targets === 1 ? '' : 's'}</span></div>
-      <div class="card-sub">${isc.luns || 0} LUNs · ${isc.sessions || 0} connected</div>
-      <div class="card-sub">${escapeHtml(isc.provisioned || '0B')} provisioned</div>
-    </div>` },
-    { id: 'nfs', html: `
-    <div class="card card-link" onclick="showPage('nfs')">
-      <div class="card-head"><span class="status-dot ${dot('nfs')}"></span>NFS</div>
-      <div class="card-value">${nf.exports || 0} <span class="card-unit">export${nf.exports === 1 ? '' : 's'}</span></div>
-      <div class="card-sub">${nf.clients || 0} client mount${nf.clients === 1 ? '' : 's'}</div>
-    </div>` },
-    { id: 'smb', html: `
-    <div class="card card-link" onclick="showPage('smb')">
-      <div class="card-head"><span class="status-dot ${dot('smb')}"></span>SMB</div>
-      <div class="card-value">${sm.shares || 0} <span class="card-unit">share${sm.shares === 1 ? '' : 's'}</span></div>
-      <div class="card-sub">${sm.users || 0} users · ${sm.connections || 0} connections</div>
-    </div>` },
-    { id: 'disks', html: `
-    <div class="card card-link" onclick="showPage('disks')">
-      <div class="card-head"><span class="status-dot ${dk.smart_ok === false ? 'red' : 'green'}"></span>Disks</div>
-      <div class="card-value">${dk.total || 0} <span class="card-unit">disks</span></div>
-      <div class="card-sub">${dk.free || 0} free · ${smartLabel}</div>
-    </div>` },
-  ];
-  // llama.cpp health/metrics card — only when the module is enabled. Fetched
-  // separately (it pings llama-server's /health + /metrics) so /api/summary
-  // stays cheap and nothing runs when the module is off.
-  if (moduleEnabled['llamacpp'] !== false) {
-    let lh = null;
-    try { lh = await API.get('/api/llama/health'); } catch (e) {}
-    const up = !!(lh && lh.ok);
-    const m = (lh && lh.metrics) || {};
-    const bits = [];
-    if (up) {
-      bits.push(escapeHtml(lh.status || 'ok'));
-      if (m.kv_cache_usage_ratio != null) bits.push(`KV ${Math.round(m.kv_cache_usage_ratio * 100)}%`);
-      if (m.requests_processing != null) bits.push(`${m.requests_processing} active`);
-      if (lh.tokens_per_sec != null) bits.push(`${lh.tokens_per_sec} tok/s`);
-    }
-    cardDefs.push({ id: 'llamacpp', html: `
-    <div class="card card-link" onclick="showPage('llamacpp')">
-      <div class="card-head"><span class="status-dot ${up ? 'green' : 'red'}"></span>llama.cpp</div>
-      <div class="card-value">${up ? 'up' : 'down'}</div>
-      <div class="card-sub">${up ? bits.join(' · ') : 'server not responding'}</div>
-      ${up && m.tokens_predicted_total != null ? `<div class="card-sub">${m.tokens_predicted_total} tokens generated</div>` : ''}
-    </div>` });
-  }
-
-  // GPU card — only when the module is enabled AND tooling is present. Fetched
-  // separately (nvidia-smi/rocm-smi) so /api/summary stays cheap on GPU-less hosts.
-  if (moduleEnabled['gpu'] !== false) {
-    let gpu = null;
-    try { gpu = await API.get('/api/gpu'); } catch (e) {}
-    if (gpu && gpu.available && (gpu.gpus || []).length) {
-      const g0 = gpu.gpus[0], n = gpu.gpus.length;
-      const bits = [];
-      if (g0.mem_pct != null) bits.push(`${Math.round(g0.mem_pct)}% VRAM`);
-      if (g0.temp != null) bits.push(`${Math.round(g0.temp)}°C`);
-      if (g0.power != null) bits.push(`${Math.round(g0.power)}W`);
-      cardDefs.push({ id: 'gpu', html: `
-    <div class="card card-link" onclick="showPage('gpu')">
-      <div class="card-head"><span class="status-dot green"></span>GPU</div>
-      <div class="card-value">${g0.util != null ? Math.round(g0.util) : 0}<span class="card-unit">% util</span></div>
-      ${usageBar(g0.util || 0)}
-      <div class="card-sub">${escapeHtml(g0.name || 'GPU')}${n > 1 ? ` +${n - 1} more` : ''}</div>
-      <div class="card-sub">${bits.join(' · ')}</div>
-    </div>` });
-    }
-  }
-
-  // DLNA Media card — only when the module is enabled. Media-library counts are
-  // fetched separately (reads minidlna's files.db) so /api/summary stays cheap.
-  if (moduleEnabled['minidlna'] !== false) {
-    const up = svc.minidlna && svc.minidlna.active === 'active';
-    let lib = null;
-    try { lib = (await API.get('/api/minidlna/stats')).library; } catch (e) {}
-    const has = lib && lib.available;
-    cardDefs.push({ id: 'minidlna', html: `
-    <div class="card card-link" onclick="showPage('minidlna')">
-      <div class="card-head"><span class="status-dot ${up ? dot('minidlna') : 'red'}"></span>DLNA Media</div>
-      <div class="card-value">${has ? Number(lib.objects || 0).toLocaleString() : (up ? 'up' : 'down')}${has ? ' <span class="card-unit">items</span>' : ''}</div>
-      <div class="card-sub">${has ? `${Number(lib.audio || 0).toLocaleString()} audio · ${Number(lib.video || 0).toLocaleString()} video · ${Number(lib.image || 0).toLocaleString()} image` : 'MiniDLNA media server'}</div>
-      ${has ? `<div class="card-sub">${fmtBytesIEC(lib.size)} database</div>` : ''}
-    </div>` });
-  }
-
   const cards = `<div class="cards">${
-    cardDefs.filter(c => moduleEnabled[c.id] !== false).map(c => c.html).join('')
+    (await collectDashboardCards({ s, svc, dot })).join('')
   }</div>`;
+
+  // The card fetches above take real time; if the user navigated away in the
+  // meantime, writing now would clobber the page they moved to.
+  if (seq !== _renderSeq) return;
 
   $('page-content').innerHTML = `
     <h2>Dashboard</h2>
@@ -447,7 +633,6 @@ async function page_dashboard() {
 }
 
 // ─── Disks ──────────────────────────────────────────────
-let _fsBases = ['/mnt', '/media'];
 
 function fmtBytes(n) {
   n = Number(n) || 0;
@@ -466,89 +651,13 @@ function fmtBytesIEC(n) {
   return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
 }
 
-// The snapshot name (dataset@snap) is a <path:> route segment, so it is used raw
-// in the URL path (slashes intact); only the query value is encoded.
-function renderMaintenance() {
-  const banner = maintTimerActive
-    ? '<div class="health-ok">✓ Scheduled maintenance is ON (hourly timer active)</div>'
-    : '<div class="alert alert-info">Scheduled maintenance is OFF — it runs once you save at least one schedule below.</div>';
-  const poolOpts = maintPools.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('') || '<option value="">(no pools)</option>';
-  const diskOpts = maintDisks.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('') || '<option value="">(no disks)</option>';
-  const scrubRows = maintState.scrubs.map((s, i) => `<tr>
-      <td><code>${escapeHtml(s.pool)}</code></td><td>${escapeHtml(s.freq)}</td>
-      <td>${escapeHtml(s.last_run || 'never')}</td>
-      <td><button class="btn btn-sm btn-danger" onclick="maintRemoveScrub(${i})">Remove</button></td></tr>`).join('');
-  const smartRows = maintState.smart.map((s, i) => `<tr>
-      <td><code>${escapeHtml(s.device)}</code></td><td>${escapeHtml(s.type)}</td><td>${escapeHtml(s.freq)}</td>
-      <td>${escapeHtml(s.last_run || 'never')}</td>
-      <td><button class="btn btn-sm" onclick="maintSmartNow('${jsArg(s.device)}','${jsArg(s.type)}')">Run now</button>
-          <button class="btn btn-sm btn-danger" onclick="maintRemoveSmart(${i})">Remove</button></td></tr>`).join('');
-  $('page-content').innerHTML = `
-    <h2>Maintenance</h2>
-    ${banner}
-    <h3>Scrub schedules</h3>
-    <table class="table"><thead><tr><th>Pool</th><th>Frequency</th><th>Last run</th><th></th></tr></thead>
-      <tbody>${scrubRows || '<tr><td colspan="4">No scrub schedules</td></tr>'}</tbody></table>
-    <div class="toolbar">
-      <select id="ms-pool" class="form-control" style="width:auto">${poolOpts}</select>
-      <select id="ms-freq" class="form-control" style="width:auto"><option value="monthly">monthly</option><option value="weekly">weekly</option></select>
-      <button class="btn btn-sm" onclick="maintAddScrub()">+ Add scrub</button>
-    </div>
-    <h3 style="margin-top:24px">SMART self-test schedules</h3>
-    <table class="table"><thead><tr><th>Disk</th><th>Type</th><th>Frequency</th><th>Last run</th><th></th></tr></thead>
-      <tbody>${smartRows || '<tr><td colspan="5">No SMART schedules</td></tr>'}</tbody></table>
-    <div class="toolbar">
-      <select id="mt-dev" class="form-control" style="width:auto">${diskOpts}</select>
-      <select id="mt-type" class="form-control" style="width:auto"><option value="short">short</option><option value="long">long</option></select>
-      <select id="mt-freq" class="form-control" style="width:auto"><option value="weekly">weekly</option><option value="daily">daily</option><option value="monthly">monthly</option></select>
-      <button class="btn btn-sm" onclick="maintAddSmart()">+ Add SMART test</button>
-    </div>
-    <div class="toolbar" style="margin-top:16px"><button class="btn" onclick="maintSave()">Save schedules</button></div>
-    <p class="help">Scrubs verify pool data integrity; SMART self-tests check drive health — the two checks that catch
-      silent rot early. A degraded pool or SMART failure then shows on the dashboard and fires a notification.
-      Saving with ≥1 schedule enables the hourly timer.</p>`;
-}
 
 function fmtTs(sec) {
   if (!sec) return '-';
   try { return new Date(sec * 1000).toLocaleString(); } catch (e) { return '-'; }
 }
 
-async function taskRun(id) {
-  try { await API.post(`/api/tasks/${encodeURIComponent(id)}/run`, {}); setTimeout(page_tasks, 900); }
-  catch (e) { alert(e.message); }
-}
 
-// ─── Log viewer ─────────────────────────────────────────
-async function logsRefresh() {
-  const out = $('log-output');
-  if (!out) return;
-  const src = $('log-source').value, pri = $('log-priority').value;
-  const lines = $('log-lines').value, grep = $('log-grep').value.trim();
-  out.textContent = 'Loading…';
-  const qs = new URLSearchParams({ source: src, lines });
-  if (pri) qs.set('priority', pri);
-  if (grep) qs.set('grep', grep);
-  try {
-    const r = await API.get('/api/logs/query?' + qs.toString());
-    out.textContent = r.logs || 'No log entries.';
-    out.scrollTop = out.scrollHeight;
-  } catch (e) { out.textContent = 'Error: ' + e.message; }
-}
-
-async function svcAction(service, action) {
-  try {
-    await API.post(`/api/service/${service}/${action}`, {});
-    page_services();
-  } catch(e) { alert(e.message); }
-}
-
-async function svcLogs(service) {
-  try {
-    const r = await API.get(`/api/logs/${service}`);
-    openModal(`Logs: ${service}`, `<pre class="raw-output" style="max-height:500px;overflow:auto">${escapeHtml(r.logs || 'No logs')}</pre>`);
-  } catch(e) { alert(e.message); }
-}
 
 // ─── Settings / TLS ─────────────────────────────────────
 // System submenu pages — split out of the old monolithic Settings page.
@@ -556,160 +665,13 @@ function adminOnlyPage(title) {
   $('page-content').innerHTML = `<h2>${title}</h2><div class="alert alert-warning">Administrator access required.</div>`;
 }
 
-// "My Account": change your own password — available to every user (incl.
-// read-only), which is why it's separate from the admin-only Users page.
-async function toggleModule(id, enabled) {
-  try {
-    await API.post('/api/modules', { id, enabled });
-    await applyModules();
-  } catch (e) {
-    alert(e.message);
-    page_modules();  // re-sync the switches with server state
-  }
-}
 
-// ─── LLama.cpp ──────────────────────────────────────────
-let _llamaArgs = [];
-let _llamaPresets = [];   // [{name, model, args}]
-let _llamaModels = [];
 
-async function fillTokRateSpark() {
-  const el = document.getElementById('spark-tokrate');
-  if (!el) return;
-  try {
-    const h = await API.get('/api/history?metric=llama_tokens_total&since=86400');
-    const p = h.points || [];
-    const rate = [];
-    for (let i = 1; i < p.length; i++) {
-      const dt = p[i][0] - p[i - 1][0], dv = p[i][1] - p[i - 1][1];
-      if (dt > 0 && dv >= 0) rate.push([p[i][0], dv / dt]);
-    }
-    el.innerHTML = sparkline(rate);
-  } catch (e) {}
-}
 
-async function auditRefresh() {
-  const el = $('audit-body');
-  if (!el) return;
-  let data;
-  try { data = await API.get('/api/audit?limit=200'); }
-  catch(e) { el.innerHTML = `<p class="help">Could not load audit log: ${escapeHtml(e.message)}</p>`; return; }
-  const entries = data.entries || [];
-  if (!entries.length) { el.innerHTML = '<p class="help">No audit entries yet.</p>'; return; }
-  const badge = r => r === 'ok' ? 'green' : (r === 'denied' ? 'yellow' : 'gray');
-  const rows = entries.map(e => {
-    const tgt = (e.target && Object.keys(e.target).length) ? ' ' + JSON.stringify(e.target) : '';
-    return `<tr>
-      <td><code>${escapeHtml(e.ts || '-')}</code></td>
-      <td>${escapeHtml(e.user || '-')}</td>
-      <td>${escapeHtml(e.ip || '-')}</td>
-      <td><code>${escapeHtml(e.method || '')} ${escapeHtml(e.path || '')}${escapeHtml(tgt)}</code></td>
-      <td><span class="status-badge ${badge(e.result)}">${escapeHtml(e.result || '')} ${e.status || ''}</span></td>
-    </tr>`;
-  }).join('');
-  el.innerHTML = `<table class="table">
-      <thead><tr><th>Time</th><th>User</th><th>IP</th><th>Action</th><th>Result</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
 
-async function tlsUploadCert() {
-  const cert = $('tls-cert').value.trim();
-  const key = $('tls-key').value.trim();
-  if (!cert || !key) { alert('Paste both the certificate and the private key'); return; }
-  try {
-    const r = await API.post('/api/tls/cert', { cert, key });
-    if (r.success) alert('Certificate saved. Restart the dashboard service on this node to apply it.');
-    page_certificate();
-  } catch(e) { alert(e.message); }
-}
 
-async function tlsRegenerate() {
-  if (!confirm('Generate a new self-signed certificate? This replaces the current one.')) return;
-  try {
-    const r = await API.post('/api/tls/regenerate', {});
-    if (r.success) alert('New self-signed certificate generated. Restart the dashboard service on this node to apply it.');
-    page_certificate();
-  } catch(e) { alert(e.message); }
-}
 
-// ─── Snapshot schedules ─────────────────────────────────
-const SNAP_FREQS = ['hourly', 'daily', 'weekly', 'monthly'];
-let snapSchedules = [];
 
-async function userDoCreate() {
-  const username = $('nu-name').value.trim(), password = $('nu-pass').value, role = $('nu-role').value, smb = $('nu-smb').checked;
-  if (!username || !password) { alert('Username and password required'); return; }
-  try {
-    const r = await API.post('/api/users', { username, password, role, smb });
-    if (!r.success) { alert(r.error || 'Failed'); return; }
-    closeModal(); page_users();
-  } catch(e) { alert(e.message); }
-}
-async function userSetRole(username, role) {
-  if (!confirm(`Change ${username} to ${role}?`)) return;
-  try { const r = await API.post(`/api/users/${encodeURIComponent(username)}/role`, { role }); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
-}
-async function userDoPassword(username) {
-  const password = $('up-pass').value;
-  if (!password) { alert('Password required'); return; }
-  try { const r = await API.post(`/api/users/${encodeURIComponent(username)}/password`, { password }); if (!r.success) { alert(r.error || 'Failed'); return; } closeModal(); alert('Password updated.'); } catch(e) { alert(e.message); }
-}
-async function userDelete(username) {
-  if (!confirm(`Delete dashboard user "${username}"?`)) return;
-  try { const r = await API.delete(`/api/users/${encodeURIComponent(username)}`); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
-}
-
-// ─── API tokens ─────────────────────────────────────────
-async function tokenDoCreate() {
-  const name = $('tk-name').value.trim();
-  const role = $('tk-role').value;
-  if (!name) { alert('Name required'); return; }
-  try {
-    const r = await API.post('/api/tokens', { name, role });
-    if (!r.success) { alert(r.error || 'Failed'); return; }
-    openModal('Token created — copy it now', `
-      <div class="alert alert-warning"><strong>This is shown only once.</strong> Store it somewhere safe;
-        it can't be retrieved again (only revoked).</div>
-      <div class="form-group"><label>Token for <strong>${escapeHtml(r.name)}</strong> (${escapeHtml(r.role)})</label>
-        <textarea class="form-control" rows="2" readonly onclick="this.select()">${escapeHtml(r.token)}</textarea></div>
-      <p class="help">Use it as a header: <code>Authorization: Bearer ${escapeHtml(r.token)}</code></p>
-      <button class="btn" onclick="closeModal(); page_users();">Done</button>`);
-  } catch(e) { alert(e.message); }
-}
-
-async function tokenDelete(id, name) {
-  if (!confirm(`Revoke API token "${name}"? Any script using it will stop working.`)) return;
-  try { const r = await API.delete(`/api/tokens/${encodeURIComponent(id)}`); if (!r.success) { alert(r.error || 'Failed'); return; } page_users(); } catch(e) { alert(e.message); }
-}
-
-// ─── Notifications ──────────────────────────────────────
-async function notifSave() {
-  const body = {
-    email: {
-      enabled: $('nf-email-en').checked, host: $('nf-host').value.trim(),
-      port: parseInt($('nf-port').value) || 587, security: $('nf-sec').value,
-      username: $('nf-user').value.trim(), password: $('nf-pass').value,
-      from: $('nf-from').value.trim(), to: $('nf-to').value.trim(),
-    },
-    webhook: { enabled: $('nf-web-en').checked, url: $('nf-url').value.trim() },
-  };
-  try {
-    const r = await API.post('/api/notifications', body);
-    if (!r.success) { alert(r.error || 'Failed'); return; }
-    $('nf-result').innerHTML = '<span style="color:#6c6">✓ Saved.</span>';
-  } catch(e) { alert(e.message); }
-}
-
-async function notifTest() {
-  $('nf-result').textContent = 'Sending test (using the last saved config)…';
-  try {
-    const r = await API.post('/api/notifications/test', {});
-    if (r.success) { $('nf-result').innerHTML = '<span style="color:#6c6">✓ Test sent.</span>'; return; }
-    const detail = (r.results || []).map(x => `${x.channel}: ${x.ok ? 'ok' : escapeHtml(x.error)}`).join(' · ');
-    $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(detail || r.error || 'failed')}</span>`;
-  } catch(e) { $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(e.message)}</span>`; }
-}
 
 // ─── Authentication ─────────────────────────────────────
 function showLogin() {

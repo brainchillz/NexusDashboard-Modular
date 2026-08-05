@@ -24,7 +24,7 @@ from .validators import *
 from .services import (SYSTEM_SERVICES, SERVICE_OVERRIDES, resolve_service,
                              _unit_present, RE_SERVICE, LLAMA_SERVICE, LLAMA_CONF,
                              LLAMA_MODELS_DIR, LLAMA_DEFAULT_BIN, LLAMA_URL)
-from .registry import load_disabled_modules, MODULES, MODULE_IDS
+from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
 from .summary import _system_resources
 from ..modules.zfs import _parse_arcstats, _arc_summary
@@ -45,12 +45,13 @@ HISTORY_DAILY_DAYS = int(os.environ.get('DASHBOARD_HISTORY_DAILY_DAYS', 400))
 HISTORY_MAX_MB = int(os.environ.get('DASHBOARD_HISTORY_MAX_MB', 64))
 # Allowlisted metrics. gpu_*/llama_tokens_total are pre-listed so features 02/06c
 # can write them without touching this set. Labels are bounded names.
+# Modules/plugins contribute additional names via the descriptor
+# `history_metrics` key — union'd in by registry.finalize() (unconditional,
+# matching this seed set: allowlist membership was never toggle-gated).
 HISTORY_METRICS = {
     'cpu_pct', 'mem_pct', 'load1', 'pool_alloc', 'pool_size',
     'arc_size', 'arc_hit_ratio', 'gpu_util', 'gpu_mem_pct', 'gpu_temp',
     'llama_tokens_total',
-    # dnsmasq module (feature 07): DNS counter deltas + DHCP lease gauge.
-    'dns_hits', 'dns_misses', 'dns_cache_size', 'dhcp_leases',
 }
 RE_HISTORY_LABEL = re.compile(r'^[A-Za-z0-9 ._:/-]{0,64}$')
 
@@ -257,20 +258,18 @@ def _history_sample():
         rows.extend(_llama_history_samples())  # feature 06c (no-op if absent)
     except Exception:
         pass
-    try:
-        rows.extend(_dnsmasq_history_samples())  # feature 07 (no-op if disabled)
-    except Exception:
-        pass
+    # Module-contributed samplers (descriptor `history` key; enabled modules
+    # only — module_hooks skips disabled ones, which is exactly the guard the
+    # old hand-written _dnsmasq_history_samples applied). The inline blocks
+    # above are the legacy aggregation, deliberately left in place: they are
+    # NOT toggle-gated today and moving them to hooks would silently stop
+    # sampling for disabled modules.
+    for _mid, _fn in module_hooks('history'):
+        try:
+            rows.extend(_fn() or [])
+        except Exception:
+            pass
     return rows
-
-
-def _dnsmasq_history_samples():
-    """DNS cache counters + DHCP lease count from the dnsmasq module — only
-    when the module is enabled (skip the CHAOS query entirely otherwise)."""
-    if 'dnsmasq' in load_disabled_modules():
-        return []
-    from ..modules.dnsmasq import collect_history_samples
-    return collect_history_samples()
 
 
 def _history_forecast_slope(points):

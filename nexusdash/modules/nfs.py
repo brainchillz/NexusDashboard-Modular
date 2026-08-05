@@ -147,5 +147,11 @@ def nfs_clients():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'nfs', 'label': 'NFS Exports', 'category': 'Sharing',
-          'blueprint': bp}
+MODULE = {'id': 'nfs', 'order': 90, 'label': 'NFS Exports', 'category': 'Sharing',
+          'nav': {'cat': 'sharing', 'cat_order': 30, 'pages': [
+                  {'id': 'nfs', 'label': 'NFS Exports', 'icon': 'share'}]},
+          'blueprint': bp,
+          'services': {'nfs': {'name': 'NFS Server', 'service': 'nfs-server',
+                               'pkg': 'nfs-kernel-server', 'binary': '/usr/sbin/nfsdclnts'}},
+          # RHEL/Rocky: NFS ships in `nfs-utils`.
+          'services_overrides': {'rhel': {'nfs': {'pkg': 'nfs-utils'}}}}

@@ -271,5 +271,12 @@ def minidlna_rebuild():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'minidlna', 'label': 'DLNA Media', 'category': 'Sharing',
-          'blueprint': bp}
+MODULE = {'id': 'minidlna', 'order': 110, 'label': 'DLNA Media', 'category': 'Sharing',
+          'nav': {'cat': 'sharing', 'cat_order': 30, 'pages': [
+                  {'id': 'minidlna', 'label': 'DLNA Media', 'icon': 'camera'}]},
+          'blueprint': bp,
+          # A media (DLNA) server is often intentionally off; a stopped one
+          # isn't an operational emergency (alert=False).
+          'services': {'minidlna': {'name': 'MiniDLNA', 'service': 'minidlna',
+                                    'pkg': 'minidlna', 'binary': '/usr/sbin/minidlnad',
+                                    'alert': False}}}

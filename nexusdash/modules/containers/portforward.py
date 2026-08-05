@@ -82,5 +82,7 @@ def instance_proxy_add(name):
 
 
 # ─── Module descriptor ─────────────────────────────────────────────────
-MODULE = {'id': 'portforward', 'label': 'Port Forward', 'category': 'LXD / Incus',
+MODULE = {'id': 'portforward', 'order': 170, 'label': 'Port Forward', 'category': 'LXD / Incus',
+          'nav': {'cat': 'lxd', 'cat_order': 50, 'pages': [
+                  {'id': 'portforward', 'label': 'Port Forward', 'icon': 'swap'}]},
           'blueprint': bp}

@@ -477,5 +477,13 @@ def llama_health():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'llamacpp', 'label': 'LLama.cpp', 'category': 'AI Tools',
-          'blueprint': bp}
+MODULE = {'id': 'llamacpp', 'order': 120, 'label': 'LLama.cpp', 'category': 'AI Tools',
+          'nav': {'cat': 'ai', 'cat_order': 40, 'pages': [
+                  {'id': 'llamacpp', 'label': 'LLama.cpp', 'icon': 'flame'}]},
+          'blueprint': bp,
+          # No apt package (pkg=None) and never raises health alerts
+          # (alert=False) — llama-server is frequently stopped on purpose /
+          # absent on storage hosts.
+          'services': {'llamacpp': {'name': 'llama.cpp', 'service': LLAMA_SERVICE,
+                                    'pkg': None, 'binary': LLAMA_DEFAULT_BIN,
+                                    'alert': False}}}

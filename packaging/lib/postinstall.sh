@@ -35,6 +35,10 @@ fi
 # 5. Ownership: the app tree, the bundled venv, and state go to the service user.
 mkdir -p /var/log/nexus-dashboard
 chown -R "$SVCUSER":"$SVCUSER" "$APPDIR" /var/log/nexus-dashboard
+# plugins/ stays root-owned: plugins are installed by root over SSH,
+# never writable by the service user (see PLUGINS.md).
+mkdir -p "$APPDIR/plugins"
+chown root:root "$APPDIR/plugins"
 
 # 6. Sudoers sanity — fail the install loudly if the shipped policy won't parse
 #    (a broken /etc/sudoers.d file can lock out sudo).

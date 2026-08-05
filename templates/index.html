@@ -70,83 +70,10 @@
       <p class="subtitle">Nexus Dashboard</p>
     </div>
   </div>
-  <ul class="nav-list">
-    <li><a href="#" data-page="dashboard" class="active"><svg class="ico"><use href="#i-grid"/></svg> Dashboard</a></li>
-    <li class="nav-group" data-cat="storage">
-      <div class="nav-cat" onclick="toggleCat('storage')">Storage MGMT <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="disks"><svg class="ico"><use href="#i-disk"/></svg> Disks</a></li>
-        <li><a href="#" data-page="zfs"><svg class="ico"><use href="#i-db"/></svg> ZFS Pools</a></li>
-        <li><a href="#" data-page="lvm"><svg class="ico"><use href="#i-lay"/></svg> LVM</a></li>
-        <li><a href="#" data-page="mdraid"><svg class="ico"><use href="#i-box3"/></svg> MD RAID</a></li>
-        <li><a href="#" data-page="schedules"><svg class="ico"><use href="#i-clock"/></svg> Auto-Snapshots</a></li>
-        <li><a href="#" data-page="replication"><svg class="ico"><use href="#i-repeat"/></svg> Replication</a></li>
-        <li><a href="#" data-page="maintenance"><svg class="ico"><use href="#i-wrench"/></svg> Maintenance</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="sharing">
-      <div class="nav-cat" onclick="toggleCat('sharing')">Sharing <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="iscsi"><svg class="ico"><use href="#i-loc"/></svg> iSCSI Targets</a></li>
-        <li><a href="#" data-page="nfs"><svg class="ico"><use href="#i-share"/></svg> NFS Exports</a></li>
-        <li><a href="#" data-page="smb"><svg class="ico"><use href="#i-folder"/></svg> SMB/CIFS</a></li>
-        <li><a href="#" data-page="minidlna"><svg class="ico"><use href="#i-camera"/></svg> DLNA Media</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="ai">
-      <div class="nav-cat" onclick="toggleCat('ai')">AI Tools <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="llamacpp"><svg class="ico"><use href="#i-flame"/></svg> LLama.cpp</a></li>
-        <li><a href="#" data-page="gpu"><svg class="ico"><use href="#i-cpu"/></svg> GPU</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="lxd">
-      <div class="nav-cat" onclick="toggleCat('lxd')">LXD / Incus <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="instances"><svg class="ico"><use href="#i-mon"/></svg> Instances</a></li>
-        <li><a href="#" data-page="images"><svg class="ico"><use href="#i-pkg"/></svg> Images</a></li>
-        <li><a href="#" data-page="ctnetworks"><svg class="ico"><use href="#i-net"/></svg> Instance Networks</a></li>
-        <li><a href="#" data-page="portforward"><svg class="ico"><use href="#i-swap"/></svg> Port Forward</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="docker">
-      <div class="nav-cat" onclick="toggleCat('docker')">Docker <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="docker"><svg class="ico"><use href="#i-pkg"/></svg> Containers &amp; Images</a></li>
-        <li><a href="#" data-page="compose"><svg class="ico"><use href="#i-box3"/></svg> Compose Stacks</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="web">
-      <div class="nav-cat" onclick="toggleCat('web')">Web <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li class="nav-admin-only"><a href="#" data-page="caddy"><svg class="ico"><use href="#i-link"/></svg> Caddy Proxy</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="dns">
-      <div class="nav-cat" onclick="toggleCat('dns')">DNS <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li data-module="dnsmasq"><a href="#" data-page="dnshosts"><svg class="ico"><use href="#i-glb"/></svg> DNS Overrides</a></li>
-        <li data-module="dnsmasq"><a href="#" data-page="dhcp"><svg class="ico"><use href="#i-swap"/></svg> DHCP</a></li>
-        <li class="nav-admin-only" data-module="dnsmasq"><a href="#" data-page="dnsconfig"><svg class="ico"><use href="#i-file"/></svg> DNS Config</a></li>
-      </ul>
-    </li>
-    <li class="nav-group" data-cat="system">
-      <div class="nav-cat" onclick="toggleCat('system')">System <span class="caret">&#9662;</span></div>
-      <ul class="nav-sub">
-        <li><a href="#" data-page="services"><svg class="ico"><use href="#i-toggle"/></svg> Services</a></li>
-        <li><a href="#" data-page="tasks"><svg class="ico"><use href="#i-cal"/></svg> Scheduled Tasks</a></li>
-        <li><a href="#" data-page="logs"><svg class="ico"><use href="#i-log"/></svg> Logs</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="network"><svg class="ico"><use href="#i-net"/></svg> Network</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="firewall"><svg class="ico"><use href="#i-shield"/></svg> Firewall</a></li>
-        <li><a href="#" data-page="account"><svg class="ico"><use href="#i-user"/></svg> My Account</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="users"><svg class="ico"><use href="#i-users"/></svg> Users &amp; Tokens</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="notifications"><svg class="ico"><use href="#i-bell"/></svg> Notifications</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="certificate"><svg class="ico"><use href="#i-cert"/></svg> Certificate</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="audit"><svg class="ico"><use href="#i-list"/></svg> Audit Log</a></li>
-        <li class="nav-admin-only"><a href="#" data-page="modules"><svg class="ico"><use href="#i-sli"/></svg> Modules</a></li>
-      </ul>
-    </li>
-  </ul>
+  <!-- The sidebar is rendered at runtime by core.js renderNav() from
+       GET /api/modules/nav — built-in modules, plugins, and the core System
+       pages alike. Nothing is hand-written here anymore. -->
+  <ul class="nav-list"></ul>
   <div class="sidebar-footer">
     <div class="footer-account">
       <span id="account-user"></span>
@@ -179,5 +106,6 @@
 <script src="/static/js/docker.js"></script>
 <script src="/static/js/caddy.js"></script>
 <script src="/static/js/dnsmasq.js"></script>
+<script src="/static/js/widgets.js"></script>
 </body>
 </html>

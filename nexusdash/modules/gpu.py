@@ -178,5 +178,7 @@ def gpu_get():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'gpu', 'label': 'GPU', 'category': 'AI Tools',
+MODULE = {'id': 'gpu', 'order': 130, 'label': 'GPU', 'category': 'AI Tools',
+          'nav': {'cat': 'ai', 'cat_order': 40, 'pages': [
+                  {'id': 'gpu', 'label': 'GPU', 'icon': 'cpu'}]},
           'blueprint': bp}

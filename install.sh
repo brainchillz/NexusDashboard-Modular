@@ -79,6 +79,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$DASHBOARD_DIR"
 if [ "$SCRIPT_DIR" != "$DASHBOARD_DIR" ]; then
     cp -r "$SCRIPT_DIR/app.py" "$SCRIPT_DIR/nexusdash" "$SCRIPT_DIR/templates" "$SCRIPT_DIR/static" "$DASHBOARD_DIR/"
+    [ -d "$SCRIPT_DIR/examples" ] && cp -r "$SCRIPT_DIR/examples" "$DASHBOARD_DIR/"
+    [ -f "$SCRIPT_DIR/PLUGINS.md" ] && cp "$SCRIPT_DIR/PLUGINS.md" "$DASHBOARD_DIR/"
     [ -f "$SCRIPT_DIR/requirements.txt" ] && cp "$SCRIPT_DIR/requirements.txt" "$DASHBOARD_DIR/"
 else
     info "  (running from $DASHBOARD_DIR — files already in place)"
@@ -1169,6 +1171,10 @@ fi
 
 info "Setting file ownership..."
 chown -R $DASHBOARD_USER:$DASHBOARD_USER $DASHBOARD_DIR
+# plugins/ stays root-owned: plugins are installed by root over SSH,
+# never writable by the service user (see PLUGINS.md).
+mkdir -p "$DASHBOARD_DIR/plugins"
+chown root:root "$DASHBOARD_DIR/plugins"
 
 info "Creating systemd service..."
 cat > /etc/systemd/system/nexus-dashboard.service << 'SERVICE'

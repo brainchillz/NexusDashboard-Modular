@@ -270,5 +270,7 @@ def compose_delete(project):
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'compose', 'label': 'Compose Stacks', 'category': 'Docker',
+MODULE = {'id': 'compose', 'order': 190, 'label': 'Compose Stacks', 'category': 'Docker',
+          'nav': {'cat': 'docker', 'cat_order': 60, 'pages': [
+                  {'id': 'compose', 'label': 'Compose Stacks', 'icon': 'box3'}]},
           'blueprint': bp}

@@ -352,5 +352,11 @@ def iscsi_saveconfig():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'iscsi', 'label': 'iSCSI Targets', 'category': 'Sharing',
-          'blueprint': bp}
+MODULE = {'id': 'iscsi', 'order': 80, 'label': 'iSCSI Targets', 'category': 'Sharing',
+          'nav': {'cat': 'sharing', 'cat_order': 30, 'pages': [
+                  {'id': 'iscsi', 'label': 'iSCSI Targets', 'icon': 'loc'}]},
+          'blueprint': bp,
+          'services': {'iscsi': {'name': 'iSCSI Target', 'service': 'target',
+                                 'pkg': 'targetcli-fb', 'binary': '/usr/bin/targetcli'}},
+          # RHEL/Rocky ships targetcli as `targetcli` (not targetcli-fb).
+          'services_overrides': {'rhel': {'iscsi': {'pkg': 'targetcli'}}}}

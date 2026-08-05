@@ -658,5 +658,13 @@ def dk_network_delete():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'docker', 'label': 'Docker', 'category': 'Docker',
-          'blueprint': bp, 'summary': _docker_summary}
+MODULE = {'id': 'docker', 'order': 180, 'label': 'Docker', 'category': 'Docker',
+          'nav': {'cat': 'docker', 'cat_order': 60, 'pages': [
+                  {'id': 'docker', 'label': 'Containers & Images', 'icon': 'pkg'}]},
+          'blueprint': bp, 'summary': _docker_summary,
+          # The module drives containers over the socket; the service manager
+          # controls the daemon itself. pkg=None (the package name varies:
+          # docker-ce / docker.io / moby-engine), so presence is inferred from
+          # the unit file or binary. alert=False: absent on most nodes by design.
+          'services': {'docker': {'name': 'Docker', 'service': 'docker', 'pkg': None,
+                                  'binary': '/usr/bin/docker', 'alert': False}}}

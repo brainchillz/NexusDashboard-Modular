@@ -577,5 +577,11 @@ def smb_homes_set():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'smb', 'label': 'SMB/CIFS', 'category': 'Sharing',
-          'blueprint': bp}
+MODULE = {'id': 'smb', 'order': 100, 'label': 'SMB/CIFS', 'category': 'Sharing',
+          'nav': {'cat': 'sharing', 'cat_order': 30, 'pages': [
+                  {'id': 'smb', 'label': 'SMB/CIFS', 'icon': 'folder'}]},
+          'blueprint': bp,
+          'services': {'smb': {'name': 'Samba', 'service': 'smbd',
+                               'pkg': 'samba', 'binary': '/usr/sbin/smbd'}},
+          # RHEL/Rocky: Samba's unit is `smb` (not `smbd`).
+          'services_overrides': {'rhel': {'smb': {'service': 'smb', 'pkg': 'samba'}}}}

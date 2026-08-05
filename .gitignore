@@ -15,6 +15,7 @@ history.db
 certs/
 token
 *.tmp.*
+plugins/
 
 # Python
 venv/

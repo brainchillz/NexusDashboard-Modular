@@ -478,5 +478,44 @@ def profiles_list():
 
 
 # ─── Module descriptor ─────────────────────────────────────────────────
-MODULE = {'id': 'instances', 'label': 'Instances', 'category': 'LXD / Incus',
-          'blueprint': bp}
+
+# Container runtime service entry (LXD via snap or deb, or Incus) — the
+# containers modules talk to it over a unix socket; the service manager
+# controls its systemd unit. Which unit/label/binary applies depends on which
+# runtime is installed, so it is detected by socket path — mirroring
+# client.py's _daemon_detect. Keyed 'instances' (this module's id) so
+# disabling the module hides the service line, like every other entry.
+# alert=False. (Moved here from core/services.py in the 3.0.0 de-wiring:
+# the entry is contributed via the descriptor's `services` key.)
+_CONTAINER_RUNTIMES = [
+    ('/var/snap/lxd/common/lxd/unix.socket',
+     {'name': 'LXD', 'service': 'snap.lxd.daemon', 'pkg': None,
+      'binary': '/snap/bin/lxd', 'alert': False}),
+    ('/var/lib/lxd/unix.socket',
+     {'name': 'LXD', 'service': 'lxd', 'pkg': None,
+      'binary': '/usr/bin/lxd', 'alert': False}),
+    ('/var/lib/incus/unix.socket',
+     {'name': 'Incus', 'service': 'incus', 'pkg': None,
+      'binary': '/usr/bin/incus', 'alert': False}),
+]
+
+
+def _detect_container_service():
+    override = os.environ.get('DASHBOARD_LXD_SOCKET')
+    if override:
+        if 'incus' in override:
+            return dict(_CONTAINER_RUNTIMES[2][1])
+        # Explicit LXD override: snap path → snap unit, else the deb unit.
+        return dict(_CONTAINER_RUNTIMES[0 if 'snap' in override else 1][1])
+    for path, entry in _CONTAINER_RUNTIMES:
+        if os.path.exists(path):
+            return dict(entry)
+    # None installed — still list an entry (Missing/inactive), like caddy/dnsmasq.
+    return dict(_CONTAINER_RUNTIMES[0][1])
+
+
+MODULE = {'id': 'instances', 'order': 140, 'label': 'Instances', 'category': 'LXD / Incus',
+          'nav': {'cat': 'lxd', 'cat_order': 50, 'pages': [
+                  {'id': 'instances', 'label': 'Instances', 'icon': 'mon'}]},
+          'blueprint': bp,
+          'services': {'instances': _detect_container_service()}}

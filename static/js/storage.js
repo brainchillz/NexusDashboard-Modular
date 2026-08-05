@@ -1459,3 +1459,70 @@ async function mdDelete(dev) {
 }
 
 // ─── Dashboard users (admin) ────────────────────────────
+
+// ─── Moved from core.js (3.0.0 decluttering): zfs/disks/maintenance/schedules helpers ───
+// core.js is now API/helpers/nav/modal/auth/dashboard-shell only;
+// module page logic lives with its page_* owner.
+
+// Lazily fill ZFS pool "full in ~N days" notes from the forecast endpoint.
+async function fillPoolForecasts(pools) {
+  for (const p of (pools || [])) {
+    const el = document.getElementById('fc-' + p.name);
+    if (!el) continue;
+    try {
+      const f = await API.get(`/api/history/forecast?label=${encodeURIComponent(p.name)}`);
+      if (f.days_to_full != null) el.textContent = `~${f.days_to_full}d to full`;
+      else if (f.fill_rate_bytes_per_day > 0) el.textContent = 'filling';
+    } catch (e) {}
+  }
+}
+
+// Extra filesystem mount bases offered by the disks page pickers.
+let _fsBases = ['/mnt', '/media'];
+
+// The snapshot name (dataset@snap) is a <path:> route segment, so it is used raw
+// in the URL path (slashes intact); only the query value is encoded.
+function renderMaintenance() {
+  const banner = maintTimerActive
+    ? '<div class="health-ok">✓ Scheduled maintenance is ON (hourly timer active)</div>'
+    : '<div class="alert alert-info">Scheduled maintenance is OFF — it runs once you save at least one schedule below.</div>';
+  const poolOpts = maintPools.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('') || '<option value="">(no pools)</option>';
+  const diskOpts = maintDisks.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('') || '<option value="">(no disks)</option>';
+  const scrubRows = maintState.scrubs.map((s, i) => `<tr>
+      <td><code>${escapeHtml(s.pool)}</code></td><td>${escapeHtml(s.freq)}</td>
+      <td>${escapeHtml(s.last_run || 'never')}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="maintRemoveScrub(${i})">Remove</button></td></tr>`).join('');
+  const smartRows = maintState.smart.map((s, i) => `<tr>
+      <td><code>${escapeHtml(s.device)}</code></td><td>${escapeHtml(s.type)}</td><td>${escapeHtml(s.freq)}</td>
+      <td>${escapeHtml(s.last_run || 'never')}</td>
+      <td><button class="btn btn-sm" onclick="maintSmartNow('${jsArg(s.device)}','${jsArg(s.type)}')">Run now</button>
+          <button class="btn btn-sm btn-danger" onclick="maintRemoveSmart(${i})">Remove</button></td></tr>`).join('');
+  $('page-content').innerHTML = `
+    <h2>Maintenance</h2>
+    ${banner}
+    <h3>Scrub schedules</h3>
+    <table class="table"><thead><tr><th>Pool</th><th>Frequency</th><th>Last run</th><th></th></tr></thead>
+      <tbody>${scrubRows || '<tr><td colspan="4">No scrub schedules</td></tr>'}</tbody></table>
+    <div class="toolbar">
+      <select id="ms-pool" class="form-control" style="width:auto">${poolOpts}</select>
+      <select id="ms-freq" class="form-control" style="width:auto"><option value="monthly">monthly</option><option value="weekly">weekly</option></select>
+      <button class="btn btn-sm" onclick="maintAddScrub()">+ Add scrub</button>
+    </div>
+    <h3 style="margin-top:24px">SMART self-test schedules</h3>
+    <table class="table"><thead><tr><th>Disk</th><th>Type</th><th>Frequency</th><th>Last run</th><th></th></tr></thead>
+      <tbody>${smartRows || '<tr><td colspan="5">No SMART schedules</td></tr>'}</tbody></table>
+    <div class="toolbar">
+      <select id="mt-dev" class="form-control" style="width:auto">${diskOpts}</select>
+      <select id="mt-type" class="form-control" style="width:auto"><option value="short">short</option><option value="long">long</option></select>
+      <select id="mt-freq" class="form-control" style="width:auto"><option value="weekly">weekly</option><option value="daily">daily</option><option value="monthly">monthly</option></select>
+      <button class="btn btn-sm" onclick="maintAddSmart()">+ Add SMART test</button>
+    </div>
+    <div class="toolbar" style="margin-top:16px"><button class="btn" onclick="maintSave()">Save schedules</button></div>
+    <p class="help">Scrubs verify pool data integrity; SMART self-tests check drive health — the two checks that catch
+      silent rot early. A degraded pool or SMART failure then shows on the dashboard and fires a notification.
+      Saving with ≥1 schedule enables the hourly timer.</p>`;
+}
+
+// ─── Snapshot schedules ─────────────────────────────────
+const SNAP_FREQS = ['hourly', 'daily', 'weekly', 'monthly'];
+let snapSchedules = [];

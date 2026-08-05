@@ -120,7 +120,9 @@ def test_container_service_detection_by_socket(monkeypatch):
     # or Incus owns the socket — detected by socket path, mirroring the containers
     # client. An explicit DASHBOARD_LXD_SOCKET override wins over fs probes.
     import os
-    from nexusdash.core import services as svc
+    # 3.0.0: detection lives in the containers module and is contributed via
+    # its descriptor's `services` key (core no longer knows about runtimes).
+    from nexusdash.modules.containers import instances as svc
     monkeypatch.delenv('DASHBOARD_LXD_SOCKET', raising=False)
     cases = [
         ('/var/snap/lxd/common/lxd/unix.socket', 'snap.lxd.daemon', 'LXD'),

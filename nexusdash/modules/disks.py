@@ -666,5 +666,7 @@ def api_logs(service):
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'disks', 'label': 'Disks', 'category': 'Storage MGMT',
+MODULE = {'id': 'disks', 'order': 10, 'label': 'Disks', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'disks', 'label': 'Disks', 'icon': 'disk'}]},
           'blueprint': bp}

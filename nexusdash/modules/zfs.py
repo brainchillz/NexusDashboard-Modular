@@ -750,5 +750,11 @@ def zfs_dataset_set_property(name):
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'zfs', 'label': 'ZFS Pools', 'category': 'Storage MGMT',
-          'blueprint': bp}
+MODULE = {'id': 'zfs', 'order': 20, 'label': 'ZFS Pools', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'zfs', 'label': 'ZFS Pools', 'icon': 'db'}]},
+          'blueprint': bp,
+          'services': {'zfs': {'name': 'ZFS', 'service': 'zfs.target',
+                               'pkg': 'zfsutils-linux', 'binary': '/usr/sbin/zpool'}},
+          # RHEL/Rocky ships ZFS from the OpenZFS repo's `zfs` package.
+          'services_overrides': {'rhel': {'zfs': {'pkg': 'zfs'}}}}

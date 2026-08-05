@@ -285,3 +285,26 @@ async function llamaPollPull() {
 // ─── Network ────────────────────────────────────────────
 let _netCountdown = null;
 
+// ─── Moved from core.js (3.0.0 decluttering): llama.cpp helpers ───
+// core.js is now API/helpers/nav/modal/auth/dashboard-shell only;
+// module page logic lives with its page_* owner.
+
+// ─── LLama.cpp ──────────────────────────────────────────
+let _llamaArgs = [];
+let _llamaPresets = [];   // [{name, model, args}]
+let _llamaModels = [];
+
+async function fillTokRateSpark() {
+  const el = document.getElementById('spark-tokrate');
+  if (!el) return;
+  try {
+    const h = await API.get('/api/history?metric=llama_tokens_total&since=86400');
+    const p = h.points || [];
+    const rate = [];
+    for (let i = 1; i < p.length; i++) {
+      const dt = p[i][0] - p[i - 1][0], dv = p[i][1] - p[i - 1][1];
+      if (dt > 0 && dv >= 0) rate.push([p[i][0], dv / dt]);
+    }
+    el.innerHTML = sparkline(rate);
+  } catch (e) {}
+}

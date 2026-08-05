@@ -369,5 +369,15 @@ def _firewall_alerts():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'firewall', 'label': 'Firewall', 'category': 'System',
-          'blueprint': bp, 'alerts': _firewall_alerts}
+MODULE = {'id': 'firewall', 'order': 200, 'label': 'Firewall', 'category': 'System',
+          'nav': {'cat': 'system', 'cat_order': 100, 'pages': [
+                  # order 50 interleaves between core Network (40) and My Account (60)
+                  {'id': 'firewall', 'label': 'Firewall', 'icon': 'shield',
+                   'admin_only': True, 'order': 50}]},
+          'blueprint': bp, 'alerts': _firewall_alerts,
+          # The firewall module is ufw-only, so this is ufw on Debian/Ubuntu
+          # and shows "Missing" on RHEL (firewalld), matching the module's own
+          # report. alert=False: a firewall is off on most nodes.
+          'services': {'firewall': {'name': 'UFW Firewall', 'service': 'ufw',
+                                    'pkg': 'ufw', 'binary': '/usr/sbin/ufw',
+                                    'alert': False}}}

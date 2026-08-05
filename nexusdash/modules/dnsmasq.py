@@ -1310,12 +1310,25 @@ def route_toggles():
 
 # ─── Module descriptor ────────────────────────────────────────────────
 MODULE = {
-    'id': 'dnsmasq',
+    'id': 'dnsmasq', 'order': 220,
     'label': 'DNS & DHCP',
     'category': 'DNS',
+    'nav': {'cat': 'dns', 'cat_order': 80, 'pages': [
+        {'id': 'dnshosts', 'label': 'DNS Overrides', 'icon': 'glb'},
+        {'id': 'dhcp', 'label': 'DHCP', 'icon': 'swap'},
+        {'id': 'dnsconfig', 'label': 'DNS Config', 'icon': 'file', 'admin_only': True}]},
     'blueprint': bp,
     'summary': summary,
     'alerts': alerts,
     'cli': {'dhcp-probe': cli_dhcp_probe},
     'default_enabled': False,
+    # DNS/DHCP server — off/absent on most nodes by design (alert=False; the
+    # module raises its own dnsmasq-down alert only when a feature is enabled).
+    'services': {'dnsmasq': {'name': 'Dnsmasq', 'service': 'dnsmasq', 'pkg': 'dnsmasq',
+                             'binary': '/usr/sbin/dnsmasq', 'alert': False}},
+    # History allowlist contribution + sampler: DNS counter deltas + DHCP
+    # lease gauge (skipped automatically while the module is disabled —
+    # module_hooks semantics replace the old hand-written guard in history.py).
+    'history_metrics': {'dns_hits', 'dns_misses', 'dns_cache_size', 'dhcp_leases'},
+    'history': collect_history_samples,
 }

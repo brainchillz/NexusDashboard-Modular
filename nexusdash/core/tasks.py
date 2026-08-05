@@ -29,24 +29,34 @@ from .auth import _is_admin, _hash_token, RE_USERNAME
 
 bp = Blueprint('tasks', __name__)
 
-MANAGED_TASKS = [
-    {'id': 'autosnap', 'label': 'Auto-Snapshots',
-     'timer': UNIT_PREFIX + '-autosnap.timer', 'service': UNIT_PREFIX + '-autosnap.service',
-     'desc': 'Take & prune scheduled ZFS snapshots'},
-    {'id': 'replicate', 'label': 'Replication',
-     'timer': UNIT_PREFIX + '-replicate.timer', 'service': UNIT_PREFIX + '-replicate.service',
-     'desc': 'Send ZFS replication jobs to remote hosts'},
-    {'id': 'alerts', 'label': 'Health Alerts',
-     'timer': UNIT_PREFIX + '-alerts.timer', 'service': UNIT_PREFIX + '-alerts.service',
+# Core-owned scheduled tasks; module-owned ones (autosnap/replicate/
+# maintenance) are contributed via the descriptor `tasks` key and merged by
+# rebuild_tasks() (registry.finalize()). `order` ints interleave the two sets
+# into the pre-3.0 list order — /api/tasks returns a LIST, so order is
+# byte-significant. timer/service unit names are synthesized from
+# UNIT_PREFIX + id (every pre-3.0 entry already followed that pattern).
+_CORE_TASKS = [
+    {'id': 'alerts', 'label': 'Health Alerts', 'order': 30,
      'desc': 'Evaluate health and send notifications'},
-    {'id': 'maintenance', 'label': 'Maintenance',
-     'timer': UNIT_PREFIX + '-maintenance.timer', 'service': UNIT_PREFIX + '-maintenance.service',
-     'desc': 'Run due scrubs and SMART self-tests'},
-    {'id': 'history', 'label': 'Metrics History',
-     'timer': UNIT_PREFIX + '-history.timer', 'service': UNIT_PREFIX + '-history.service',
+    {'id': 'history', 'label': 'Metrics History', 'order': 50,
      'desc': 'Sample metrics into the history store'},
 ]
-TASK_IDS = {t['id'] for t in MANAGED_TASKS}
+
+MANAGED_TASKS = []      # filled by rebuild_tasks(); mutated in place (facade)
+TASK_IDS = set()
+
+
+def rebuild_tasks(contribs):
+    """Merge descriptor-contributed task records with the core set, sorted by
+    their `order` int (registration sequence breaks ties). Idempotent."""
+    entries = [dict(t) for t in _CORE_TASKS] + [dict(t) for t in contribs]
+    entries.sort(key=lambda t: t.get('order', 1000))
+    for t in entries:
+        t.setdefault('timer', UNIT_PREFIX + '-' + t['id'] + '.timer')
+        t.setdefault('service', UNIT_PREFIX + '-' + t['id'] + '.service')
+    MANAGED_TASKS[:] = entries
+    TASK_IDS.clear()
+    TASK_IDS.update(t['id'] for t in entries)
 
 
 def _systemctl_show(unit, props):

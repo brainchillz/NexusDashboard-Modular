@@ -285,6 +285,10 @@ def cli_replicate_tick():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'replication', 'label': 'Replication', 'category': 'Storage MGMT',
+MODULE = {'id': 'replication', 'order': 60, 'label': 'Replication', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'replication', 'label': 'Replication', 'icon': 'repeat'}]},
           'blueprint': bp,
-          'cli': {'replicate-tick': cli_replicate_tick}}
+          'cli': {'replicate-tick': cli_replicate_tick},
+          'tasks': [{'id': 'replicate', 'label': 'Replication', 'order': 20,
+                     'desc': 'Send ZFS replication jobs to remote hosts'}]}

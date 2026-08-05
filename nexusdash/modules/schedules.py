@@ -183,6 +183,10 @@ def cli_autosnap_tick():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'schedules', 'label': 'Auto-Snapshots', 'category': 'Storage MGMT',
+MODULE = {'id': 'schedules', 'order': 50, 'label': 'Auto-Snapshots', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'schedules', 'label': 'Auto-Snapshots', 'icon': 'clock'}]},
           'blueprint': bp,
-          'cli': {'autosnap-tick': cli_autosnap_tick}}
+          'cli': {'autosnap-tick': cli_autosnap_tick},
+          'tasks': [{'id': 'autosnap', 'label': 'Auto-Snapshots', 'order': 10,
+                     'desc': 'Take & prune scheduled ZFS snapshots'}]}

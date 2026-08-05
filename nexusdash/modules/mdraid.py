@@ -215,5 +215,7 @@ def api_network():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'mdraid', 'label': 'MD RAID', 'category': 'Storage MGMT',
+MODULE = {'id': 'mdraid', 'order': 40, 'label': 'MD RAID', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'mdraid', 'label': 'MD RAID', 'icon': 'box3'}]},
           'blueprint': bp}

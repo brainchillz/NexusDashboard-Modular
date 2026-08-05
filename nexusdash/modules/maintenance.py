@@ -143,6 +143,10 @@ def maintenance_smart_test():
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────
-MODULE = {'id': 'maintenance', 'label': 'Maintenance', 'category': 'Storage MGMT',
+MODULE = {'id': 'maintenance', 'order': 70, 'label': 'Maintenance', 'category': 'Storage MGMT',
+          'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
+                  {'id': 'maintenance', 'label': 'Maintenance', 'icon': 'wrench'}]},
           'blueprint': bp,
-          'cli': {'maintenance-tick': cli_maintenance_tick}}
+          'cli': {'maintenance-tick': cli_maintenance_tick},
+          'tasks': [{'id': 'maintenance', 'label': 'Maintenance', 'order': 40,
+                     'desc': 'Run due scrubs and SMART self-tests'}]}

@@ -32,7 +32,7 @@ covered by the test suite); NEW modules contribute via hooks instead.
 """
 import os
 import json
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_from_directory
 
 from .config import APP_DIR, write_json_atomic
 from .runcmd import err
@@ -50,9 +50,11 @@ DEFAULT_OFF = set()     # ids disabled unless the operator explicitly enables th
 _DESCRIPTORS = {}       # id -> full descriptor
 _BP_TO_MODULE = {}      # blueprint name -> module id
 _LOADED = set()         # module ids whose blueprint is actually registered
+_SOURCES = {}           # id -> 'builtin' | 'plugin' | 'yaml'
+_PLUGIN_ERRORS = {}     # plugin name -> load-failure detail (admin-only)
 
 
-def register_module(desc):
+def register_module(desc, source='builtin'):
     """Declare a feature module (idempotent). Does NOT attach the blueprint —
     create_app registers it separately (always, even when disabled). A
     descriptor with `default_enabled=False` is OFF until explicitly enabled
@@ -64,6 +66,7 @@ def register_module(desc):
     _DESCRIPTORS[mid] = desc
     MODULES.append({'id': mid, 'label': desc['label'], 'category': desc['category']})
     MODULE_IDS.add(mid)
+    _SOURCES[mid] = source
     if not desc.get('default_enabled', True):
         DEFAULT_OFF.add(mid)
     blueprint = desc.get('blueprint')
@@ -73,6 +76,47 @@ def register_module(desc):
 
 def mark_loaded(mid):
     _LOADED.add(mid)
+
+
+def reset():
+    """Clear ALL registry state — in place, never rebinding (the app.py facade
+    and every `from .registry import MODULES`-style binding hold references to
+    these exact objects). Destructive: a reset MUST be followed by a fresh
+    create_app() (or an explicit restore) before anything touches the registry
+    again. Test-only in practice; see the fresh_registry fixture."""
+    MODULES.clear()
+    MODULE_IDS.clear()
+    DEFAULT_OFF.clear()
+    _DESCRIPTORS.clear()
+    _BP_TO_MODULE.clear()
+    _LOADED.clear()
+    _SOURCES.clear()
+    _PLUGIN_ERRORS.clear()
+
+
+def finalize():
+    """Rebuild the merged core tables from registered descriptors. Called once
+    by create_app() after every descriptor is registered; idempotent (each
+    rebuild starts from its seed and mutates its target in place — the facade
+    binds these exact objects).
+
+    Consumes: `services` + `services_overrides` (-> SYSTEM_SERVICES),
+    `tasks` (-> MANAGED_TASKS), `history_metrics` (-> HISTORY_METRICS).
+    Lazy imports: services/tasks/history import this module at top level."""
+    from . import services as _services
+    from . import tasks as _tasks
+    from . import history as _history
+    svc_contribs, svc_overrides, task_contribs = [], [], []
+    for m in MODULES:
+        desc = _DESCRIPTORS.get(m['id'], {})
+        if desc.get('services'):
+            svc_contribs.append((m['id'], desc['services']))
+        if desc.get('services_overrides'):
+            svc_overrides.append(desc['services_overrides'])
+        task_contribs.extend(desc.get('tasks') or [])
+        _history.HISTORY_METRICS.update(desc.get('history_metrics') or ())
+    _services.rebuild_services(svc_contribs, svc_overrides)
+    _tasks.rebuild_tasks(task_contribs)
 
 
 def module_for_endpoint(endpoint):
@@ -96,10 +140,14 @@ def module_hooks(kind):
 
 
 def cli_commands():
-    """CLI subcommands contributed by registered modules."""
+    """CLI subcommands contributed by registered modules. First registration
+    wins on a duplicate name: CLI names are systemd-facing (timers call
+    `python app.py <name>`), so a later-registered module — in particular an
+    operator plugin — must never shadow an existing tick command."""
     cmds = {}
     for desc in _DESCRIPTORS.values():
-        cmds.update(desc.get('cli') or {})
+        for name, fn in (desc.get('cli') or {}).items():
+            cmds.setdefault(name, fn)
     return cmds
 
 
@@ -130,6 +178,136 @@ def _enabled_module_ids():
     node-type auto-classification."""
     disabled = load_disabled_modules()
     return [m['id'] for m in MODULES if m['id'] not in disabled]
+
+
+# ─── Nav manifest (/api/modules/nav) ────────────────────────────────────
+# The frontend renders the ENTIRE sidebar from this manifest — built-in
+# modules, plugins, and the core System pages alike (nothing is hand-written
+# in index.html anymore). Modules declare their nav via the descriptor `nav`
+# key; the core pages (which belong to no module) are declared here.
+# Item `order` interleaves within a category: the core System pages use
+# 10..110 and firewall's descriptor slots itself at 50 (between Network and
+# My Account), reproducing the pre-3.0 sidebar exactly.
+
+_CORE_NAV_CAT = {'cat': 'system', 'label': 'System', 'order': 100}
+_CORE_NAV_PAGES = [
+    {'id': 'services', 'label': 'Services', 'icon': 'toggle', 'order': 10},
+    {'id': 'tasks', 'label': 'Scheduled Tasks', 'icon': 'cal', 'order': 20},
+    {'id': 'logs', 'label': 'Logs', 'icon': 'log', 'order': 30},
+    {'id': 'network', 'label': 'Network', 'icon': 'net',
+     'admin_only': True, 'order': 40},
+    {'id': 'account', 'label': 'My Account', 'icon': 'user', 'order': 60},
+    {'id': 'users', 'label': 'Users & Tokens', 'icon': 'users',
+     'admin_only': True, 'order': 70},
+    {'id': 'notifications', 'label': 'Notifications', 'icon': 'bell',
+     'admin_only': True, 'order': 80},
+    {'id': 'certificate', 'label': 'Certificate', 'icon': 'cert',
+     'admin_only': True, 'order': 90},
+    {'id': 'audit', 'label': 'Audit Log', 'icon': 'list',
+     'admin_only': True, 'order': 100},
+    {'id': 'modules', 'label': 'Modules', 'icon': 'sli',
+     'admin_only': True, 'order': 110},
+]
+
+
+def _nav_manifest():
+    """Assemble nav categories from the core pages + every registered
+    module's `nav` declaration. First declaration of a category wins its
+    label/order; items sort by (order, declaration sequence) — a module
+    page's order defaults to its module's own `order` key."""
+    cats = {}
+    seq = 0
+
+    def add(cat, label, order, item, item_order):
+        nonlocal seq
+        c = cats.setdefault(cat, {'cat': cat, 'label': label, 'order': order,
+                                  '_seq': seq, 'items': []})
+        c['items'].append((item_order, seq, item))
+        seq += 1
+
+    for p in _CORE_NAV_PAGES:
+        add(_CORE_NAV_CAT['cat'], _CORE_NAV_CAT['label'], _CORE_NAV_CAT['order'],
+            {'page': p['id'], 'label': p['label'], 'icon': p['icon'],
+             'module': None, 'admin_only': bool(p.get('admin_only'))},
+            p['order'])
+    for m in MODULES:
+        desc = _DESCRIPTORS.get(m['id'], {})
+        nav = desc.get('nav')
+        if not nav:
+            continue
+        for p in nav.get('pages', []):
+            item = {'page': p['id'], 'label': p.get('label', m['label']),
+                    'icon': p.get('icon'), 'module': m['id'],
+                    'admin_only': bool(p.get('admin_only'))}
+            if p.get('icon_paths'):
+                item['icon_paths'] = p['icon_paths']
+            add(nav['cat'], m['category'], nav.get('cat_order', 1000),
+                item, p.get('order', desc.get('order', 1000)))
+
+    out = []
+    for c in sorted(cats.values(), key=lambda c: (c['order'], c['_seq'])):
+        items = [it for _o, _s, it in sorted(c['items'],
+                                             key=lambda t: (t[0], t[1]))]
+        out.append({'cat': c['cat'], 'label': c['label'],
+                    'order': c['order'], 'items': items})
+    return out
+
+
+@bp.route('/api/modules/nav')
+def modules_nav_get():
+    """The full UI manifest: per-module state + extras (plugin assets and
+    declarative pages arrive with the plugin tiers) and the nav categories.
+    /api/modules keeps its exact pre-3.0 shape for the controller; this
+    endpoint is the frontend's single fetch."""
+    disabled = load_disabled_modules()
+    mods = []
+    for m in MODULES:
+        desc = _DESCRIPTORS.get(m['id'], {})
+        mods.append({**m,
+                     'enabled': m['id'] not in disabled,
+                     'loaded': m['id'] in _LOADED,
+                     'installed': m['id'] in _LOADED,
+                     'builtin': _SOURCES.get(m['id'], 'builtin') == 'builtin',
+                     'version': desc.get('version'),
+                     'assets': desc.get('assets'),
+                     'dashboard_card': desc.get('dashboard_card'),
+                     'ui_pages': desc.get('ui_pages')})
+    return jsonify({'modules': mods, 'nav': {'categories': _nav_manifest()}})
+
+
+# ─── Plugins (out-of-tree modules) ──────────────────────────────────────
+
+@bp.route('/api/plugins')
+def plugins_get():
+    """Plugin inventory + load status. Failure detail and filesystem paths
+    are admin-only; read-only users see id/source/status."""
+    from .auth import _is_admin      # lazy: auth imports registry at top
+    admin = _is_admin()
+    out = []
+    for mid, src in _SOURCES.items():
+        if src not in ('plugin', 'yaml'):
+            continue
+        entry = {'id': mid, 'source': src, 'loaded': mid in _LOADED,
+                 'status': 'error' if mid in _PLUGIN_ERRORS else 'ok'}
+        if admin:
+            entry['path'] = _DESCRIPTORS.get(mid, {}).get('_path')
+            if mid in _PLUGIN_ERRORS:
+                entry['error'] = _PLUGIN_ERRORS[mid]
+        out.append(entry)
+    return jsonify({'plugins': out})
+
+
+@bp.route('/plugin-assets/<plugin>/<path:filename>')
+def plugin_asset(plugin, filename):
+    """Serve a loaded plugin's static/ files. Auth-gated like every non-public
+    endpoint (assets inject post-login, same-origin cookies ride along);
+    send_from_directory confines traversal."""
+    desc = _DESCRIPTORS.get(plugin)
+    if (_SOURCES.get(plugin) not in ('plugin', 'yaml')
+            or not desc or not desc.get('_path')
+            or plugin in _PLUGIN_ERRORS):
+        return err('Unknown plugin', 404)
+    return send_from_directory(os.path.join(desc['_path'], 'static'), filename)
 
 
 @bp.route('/api/modules')

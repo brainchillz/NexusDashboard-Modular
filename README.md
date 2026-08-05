@@ -94,6 +94,16 @@ compose labels and get stack-level up/down/restart/pull/logs, while stacks
 created in the UI are stored under the app and validated with
 `docker compose config` before they are ever kept.
 
+## Plugins (3.0.0)
+
+Drop a directory into `plugins/` next to `app.py` and restart — it registers
+like a built-in module (Modules-page toggle, same auth/RBAC/audit). Two
+tiers: a **declarative** one (a single `plugin.yaml` — service card, command
+tables, action buttons, log tail; only argv literally written in the file
+ever executes) and a **Python** one with full module powers. See
+[PLUGINS.md](PLUGINS.md) and the worked examples in `examples/plugins/`
+(`hello-world`, `wireguard`).
+
 ## Architecture (short version)
 
 ```
@@ -115,7 +125,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 429 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 492 tests, no root/hardware needed
 ```
 
 ## Lineage

@@ -24,7 +24,7 @@ from .validators import *
 from .services import (SYSTEM_SERVICES, SERVICE_OVERRIDES, resolve_service,
                              _unit_present, RE_SERVICE, LLAMA_SERVICE, LLAMA_CONF,
                              LLAMA_MODELS_DIR, LLAMA_DEFAULT_BIN, LLAMA_URL)
-from .registry import load_disabled_modules, MODULES, MODULE_IDS
+from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
 from .summary import _system_resources
 from ..modules.disks import _smart_health_ok
@@ -128,14 +128,28 @@ def metrics():
             tok = auth[7:]
         if not hmac.compare_digest(tok, METRICS_TOKEN):
             return Response('unauthorized\n', status=401, mimetype='text/plain')
-    return Response(_render_metrics(_metrics_families()),
+    text = _render_metrics(_metrics_families())
+    # Module-contributed exposition lines (descriptor `metrics` key; enabled
+    # modules only). Contract: the hook returns COMPLETE lines including its
+    # own # HELP/# TYPE. The inline families above are the legacy aggregation
+    # and stay put — with zero current hook producers this appends nothing,
+    # keeping the exposition byte-identical.
+    extra = []
+    for _mid, _fn in module_hooks('metrics'):
+        try:
+            extra.extend(_fn() or [])
+        except Exception:
+            pass  # a broken module hook must never take down the exposition
+    if extra:
+        text += '\n'.join(extra) + '\n'
+    return Response(text,
                     mimetype='text/plain; version=0.0.4; charset=utf-8')
 
 
 # Registered as a toggleable module (default OFF) so it appears as a tickbox on
 # the Modules page. Its blueprint is a core blueprint already registered by
 # create_app; this descriptor only adds the Modules-page entry + the toggle.
-MODULE = {'id': 'metrics', 'label': 'Prometheus metrics (/metrics)',
+MODULE = {'id': 'metrics', 'order': 230, 'label': 'Prometheus metrics (/metrics)',
           'category': 'System', 'blueprint': bp, 'default_enabled': False}
 
 

@@ -65,12 +65,16 @@ done
 echo "stage: application runtime tree -> /$APPDIR"
 mkdir -p "$DEST/$APPDIR"
 cp -a "$SRC/app.py" "$SRC/nexusdash" "$SRC/templates" "$SRC/static" "$DEST/$APPDIR/"
-cp -a "$SRC/requirements.txt" "$DEST/$APPDIR/"
+cp -a "$SRC/requirements.txt" "$SRC/PLUGINS.md" "$DEST/$APPDIR/"
+cp -a "$SRC/examples" "$DEST/$APPDIR/"
 # State/log dirs the app expects (ownership is fixed up in postinstall).
 mkdir -p "$DEST/$APPDIR/dnsmasq/render/dnsmasq.d" \
          "$DEST/$APPDIR/dnsmasq/render/hosts.d" \
          "$DEST/$APPDIR/dnsmasq/state" \
          "$DEST/$APPDIR/dnsmasq/leases" \
          "$DEST/var/log/nexus-dashboard"
+# Operator plugin dir — root-owned by design (postinstall re-roots it
+# after the service-user chown): installing a plugin is a root action.
+mkdir -p "$DEST/$APPDIR/plugins"
 
 echo "stage: done -> $DEST"
