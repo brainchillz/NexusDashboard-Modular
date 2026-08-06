@@ -47,6 +47,10 @@ TLS_ENABLED = env_bool('DASHBOARD_TLS', True)
 # The listen port. Resolved here (not just in __main__) so request handlers can
 # build self-referential URLs (e.g. the network handoff link to the new IP).
 DASHBOARD_PORT = int(os.environ.get('DASHBOARD_PORT', 8443 if TLS_ENABLED else 8080))
+# The listen address. Set DASHBOARD_BIND=127.0.0.1 behind a local reverse
+# proxy so the plain-HTTP backend is unreachable except through the proxy
+# (the precondition for trusting X-Forwarded-For — see DASHBOARD_PROXY_FIX).
+DASHBOARD_BIND = os.environ.get('DASHBOARD_BIND', '0.0.0.0')
 TLS_DIR = os.environ.get('DASHBOARD_TLS_DIR', os.path.join(APP_DIR, 'certs'))
 TLS_CERT = os.environ.get('DASHBOARD_TLS_CERT', os.path.join(TLS_DIR, 'dashboard.crt'))
 TLS_KEY = os.environ.get('DASHBOARD_TLS_KEY', os.path.join(TLS_DIR, 'dashboard.key'))

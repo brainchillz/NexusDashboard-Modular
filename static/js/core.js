@@ -83,10 +83,11 @@ function parseSize(s) {
 }
 
 // Render a usage bar; colour shifts green -> yellow -> red as it fills.
+// Thin track with the percentage beside it (not overlaid) — see .usage in style.css.
 function usageBar(pct) {
   pct = Math.max(0, Math.min(100, Math.round(pct)));
   const cls = pct >= 90 ? 'red' : pct >= 70 ? 'yellow' : 'green';
-  return `<div class="usage-bar"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div><span class="usage-bar-label">${pct}%</span></div>`;
+  return `<div class="usage"><div class="usage-bar"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div></div><span class="usage-pct">${pct}%</span></div>`;
 }
 
 // ─── Modal ──────────────────────────────────────────────
@@ -356,13 +357,43 @@ function applyThemeLabel() {
   const el = $('theme-label');
   if (el) el.textContent = light ? 'Dark theme' : 'Light theme';
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', light ? '#ffffff' : '#1a1f2e');
+  if (meta) meta.setAttribute('content', light ? '#f9f7f3' : '#1b1c1e');
 }
 function toggleTheme(e) {
   if (e) e.preventDefault();
   const light = document.documentElement.classList.toggle('theme-light');
   try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (err) {}
   applyThemeLabel();
+}
+
+// ─── Machine strip ──────────────────────────────────────
+// The slim identity bar across the top of the content column: hostname, IP,
+// uptime, load, UTC clock. Host/IP land from /api/summary whenever the
+// dashboard renders; uptime/load refresh from the cheap /proc-backed
+// /api/system/resources on the same 30s interval as the dashboard.
+let appVersion = '';
+const stripInfo = { host: '', ip: '', up: null, load: null };
+
+function renderMachineStrip() {
+  const el = $('machine-strip');
+  if (!el) return;
+  const t = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const parts = [];
+  if (stripInfo.host) parts.push(`<span class="ms-host">${escapeHtml(stripInfo.host)}</span>`);
+  if (stripInfo.ip) parts.push(`<span>${escapeHtml(stripInfo.ip)}</span>`);
+  if (stripInfo.up != null) parts.push(`<span>up ${fmtUptime(stripInfo.up)}</span>`);
+  if (stripInfo.load) parts.push(`<span>load ${stripInfo.load['1'] ?? '-'} ${stripInfo.load['5'] ?? '-'} ${stripInfo.load['15'] ?? '-'}</span>`);
+  parts.push(`<span class="ms-right">${t}</span>`);
+  el.innerHTML = parts.join('');
+}
+
+async function refreshMachineStrip() {
+  try {
+    const r = await API.get('/api/system/resources');
+    stripInfo.up = r.uptime_seconds;
+    stripInfo.load = r.load || null;
+  } catch (e) {}   // strip degrades to host + clock; never throws at callers
+  renderMachineStrip();
 }
 
 // ─── Dashboard ──────────────────────────────────────────
@@ -592,6 +623,11 @@ async function page_dashboard() {
   const z = s.zfs || {};
   const alerts = s.alerts || [];
 
+  // Feed the machine strip the identity fields only /api/summary carries.
+  if (sys.hostname) stripInfo.host = sys.hostname;
+  if (sys.ip) stripInfo.ip = sys.ip;
+  renderMachineStrip();
+
   const health = alerts.length
     ? `<div class="alert alert-warning"><strong>${alerts.length} issue${alerts.length > 1 ? 's' : ''}:</strong> ${alerts.map(escapeHtml).join(' · ')}</div>`
     : `<div class="health-ok">✓ All systems healthy</div>`;
@@ -617,13 +653,9 @@ async function page_dashboard() {
   // meantime, writing now would clobber the page they moved to.
   if (seq !== _renderSeq) return;
 
+  // Host/IP/uptime moved to the always-visible machine strip — no info-row here.
   $('page-content').innerHTML = `
     <h2>Dashboard</h2>
-    <div class="info-row">
-      <span>Host: <strong>${escapeHtml(sys.hostname || '-')}</strong></span>
-      <span>IP: <strong>${escapeHtml(sys.ip || '-')}</strong></span>
-      <span>Uptime: <strong>${sys.uptime_days || 0} d</strong></span>
-    </div>
     ${welcome}
     ${health}
     ${cards}
@@ -678,13 +710,17 @@ function showLogin() {
   isAuthed = false;
   document.querySelector('.sidebar').style.display = 'none';
   document.querySelector('.content').style.display = 'none';
+  $('machine-strip').style.display = 'none';
   closeModal();
+  // The login box names the machine being signed in to.
+  const sub = $('login-sub');
+  if (sub && location.hostname) sub.textContent = location.hostname;
   $('login-screen').style.display = 'flex';
   $('login-pass').value = '';
   $('login-user').focus();
 }
 
-async function showApp(user, fqdn, role, mustChange) {
+async function showApp(user, fqdn, role, mustChange, version) {
   isAuthed = true;
   currentRole = role || 'admin';
   $('login-screen').style.display = 'none';
@@ -692,7 +728,15 @@ async function showApp(user, fqdn, role, mustChange) {
   document.querySelector('.content').style.display = '';
   document.body.classList.toggle('readonly', currentRole !== 'admin');
   currentUser = user || '';
-  if (fqdn) $('sidebar-title').textContent = fqdn;
+  if (version) appVersion = version;
+  // Brand block: product name up top, machine identity + version beneath.
+  stripInfo.host = fqdn || stripInfo.host;
+  const sub = $('sidebar-sub');
+  if (sub) sub.innerHTML =
+    `<strong>${escapeHtml((fqdn || location.hostname || '').split('.')[0])}</strong>` +
+    (appVersion ? ` · v${escapeHtml(appVersion)}` : '');
+  $('machine-strip').style.display = '';
+  refreshMachineStrip();   // fire-and-forget; strip fills in as data lands
   $('account-user').textContent = user ? `Signed in as ${user}${currentRole !== 'admin' ? ' · read-only' : ''}` : '';
   await applyModules();   // load module state before the dashboard first renders
   showPage('dashboard');
@@ -727,7 +771,7 @@ async function doLogin(e) {
       errEl.style.display = 'block';
       return;
     }
-    showApp(j.user, j.fqdn, j.role, j.must_change);
+    showApp(j.user, j.fqdn, j.role, j.must_change, j.version);
   } catch (err) {
     errEl.textContent = 'Login failed';
     errEl.style.display = 'block';
@@ -768,7 +812,7 @@ async function checkAuth() {
     const r = await fetch('/api/me');
     if (!r.ok) { showLogin(); return; }
     const j = await r.json();
-    showApp(j.user, j.fqdn, j.role, j.must_change);
+    showApp(j.user, j.fqdn, j.role, j.must_change, j.version);
   } catch (err) { showLogin(); }
 }
 
@@ -791,7 +835,7 @@ async function bootstrap() {
       history.replaceState(null, '', window.location.pathname);  // never leave the token in the URL
       if (r.ok && j.success) {
         cameFromHandoff = true;
-        await showApp(j.user, j.fqdn, j.role, false);
+        await showApp(j.user, j.fqdn, j.role, false, j.version);
         showPage('network');
         return;
       }
@@ -806,6 +850,7 @@ bootstrap();
 // Auto-refresh dashboard every 10s
 setInterval(async () => {
   if (!isAuthed) return;
+  refreshMachineStrip();   // cheap /proc-backed endpoint; keeps uptime/load/clock live
   // Refresh the dashboard metrics when it's open and no modal is in the way.
   const active = document.querySelector('.nav-list a.active');
   if (active && active.dataset.page === 'dashboard' && $('modal-overlay').style.display === 'none') {

@@ -74,6 +74,15 @@ sys.modules[__name__].__class__ = _FacadeModule
 
 app = create_app()
 
+# Opt-in reverse-proxy support (DASHBOARD_PROXY_FIX=1): trust ONE hop of
+# X-Forwarded-For/-Proto so audit logs record the real client IP when a
+# local TLS-terminating proxy (caddy) fronts the dashboard. Only safe when
+# the backend port is unreachable except via the proxy (firewall-closed) —
+# XFF is trivially spoofable on a directly reachable port. Default OFF.
+if _m_config.env_bool('DASHBOARD_PROXY_FIX', False):
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 
 if __name__ == '__main__':
     _rc = _m_cli.dispatch(sys.argv)
@@ -84,5 +93,5 @@ if __name__ == '__main__':
     if _m_config.TLS_ENABLED:
         _m_tls.ensure_tls_cert()
         ssl_context = (_m_config.TLS_CERT, _m_config.TLS_KEY)
-    app.run(host='0.0.0.0', port=_m_config.DASHBOARD_PORT,
+    app.run(host=_m_config.DASHBOARD_BIND, port=_m_config.DASHBOARD_PORT,
             ssl_context=ssl_context, debug=False, threaded=True)

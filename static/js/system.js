@@ -92,10 +92,17 @@ async function page_services() {
 // "My Account": change your own password — available to every user (incl.
 // read-only), which is why it's separate from the admin-only Users page.
 async function page_account() {
+  const light = document.documentElement.classList.contains('theme-light');
   $('page-content').innerHTML = `
     <h2>My Account</h2>
     <p>Signed in as <strong>${escapeHtml(currentUser || 'admin')}</strong> (${escapeHtml(currentRole)}).</p>
-    <button class="btn" onclick="changePassword()">Change My Password</button>`;
+    <button class="btn" onclick="changePassword()">Change My Password</button>
+    <h3>Appearance</h3>
+    <label class="checkitem" style="max-width:280px">
+      <input type="checkbox" ${light ? 'checked' : ''}
+             onchange="toggleTheme(); page_account();"> Light theme
+    </label>
+    <p class="help">Stored in this browser only — each browser keeps its own choice.</p>`;
 }
 
 // "Users & Tokens": manage dashboard accounts and API tokens (admin only).
