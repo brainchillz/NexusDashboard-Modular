@@ -34,9 +34,15 @@ RE_LLAMA_VALUE = re.compile(r'^[A-Za-z0-9_./:,@=+-]*$')  # no spaces/quotes/newl
 
 # llama-server flags that take no value (presence-only) — used only to split an
 # existing LLAMA_OPTS string into flag/value pairs for the editor.
+#
+# Only list a flag here if it truly takes NO value: a value-taking flag listed
+# as boolean has its value parsed as a stray token and silently DROPPED on save
+# (see _llama_parse_opts). upstream has been migrating former booleans to
+# 'on|off|auto' enums — as of b10333 those are --flash-attn/-fa, --log-colors,
+# --color, --fit, --fit-print and --reasoning, none of which belong here.
 LLAMA_BOOL_FLAGS = frozenset({
-    '--verbose', '-v', '--log-disable', '--log-colors', '--log-verbose', '--offline',
-    '--escape', '--no-escape', '--ignore-eos', '--perf', '--no-perf', '--flash-attn', '-fa',
+    '--verbose', '-v', '--log-disable', '--log-verbose', '--offline',
+    '--escape', '--no-escape', '--ignore-eos', '--perf', '--no-perf',
     '--mlock', '--no-mmap', '--mmap', '--no-host', '--repack', '--no-repack',
     '--kv-offload', '-kvo', '--no-kv-offload', '-nkvo', '--direct-io', '-dio', '--no-direct-io', '-ndio',
     '--op-offload', '--no-op-offload', '--cpu-moe', '-cmoe',

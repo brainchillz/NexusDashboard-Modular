@@ -28,6 +28,15 @@ def test_parse_opts_handles_bool_value_and_equals():
     assert {'flag': '-fa', 'value': ''} in parsed              # short boolean
 
 
+def test_parse_opts_keeps_enum_flag_values():
+    """-fa/--log-colors take 'on|off|auto' upstream, so their value must survive
+    a parse/format round trip — listed as booleans they were silently dropped."""
+    parsed = app._llama_parse_opts('-fa on --log-colors off --threads 8')
+    assert {'flag': '-fa', 'value': 'on'} in parsed
+    assert {'flag': '--log-colors', 'value': 'off'} in parsed
+    assert app._llama_format_opts(parsed) == '-fa on --log-colors off --threads 8'
+
+
 def test_opts_round_trip():
     s = '--threads 16 --n-gpu-layers 99 --mlock'
     assert app._llama_format_opts(app._llama_parse_opts(s)) == s
