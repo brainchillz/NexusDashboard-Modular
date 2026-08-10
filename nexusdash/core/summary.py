@@ -287,7 +287,7 @@ def api_summary():
     except (OSError, ValueError):
         uptime_days = 0
     system = {'hostname': socket.gethostname(), 'uptime_days': uptime_days,
-              'ip': _primary_ipv4()}
+              'ip': _primary_ipv4(), 'os': PLATFORM['pretty']}
 
     # ZFS
     pools = size = alloc = 0
@@ -449,5 +449,33 @@ def _system_resources():
 @bp.route('/api/system/resources')
 def system_resources():
     return jsonify(_system_resources())
+
+
+# ─── Host power (reboot / shutdown) ────────────────────────────────────
+# Core, never module-gated; POST means central RBAC already requires admin.
+# The blanket systemctl sudoers grant every node has covers reboot/poweroff —
+# no helper, no new sudoers. The action is fired from a short-delay thread so
+# the HTTP response and the audit-log write get out before the box goes down.
+def _schedule_power(action):
+    from flask import current_app
+    if current_app.config.get('TESTING'):
+        return False   # a test must never power-cycle the machine it runs on
+    def go():
+        time.sleep(2)
+        run(['systemctl', action])
+    threading.Thread(target=go, daemon=True).start()
+    return True
+
+
+@bp.route('/api/system/reboot', methods=['POST'])
+def api_system_reboot():
+    return jsonify({'success': True, 'action': 'reboot',
+                    'scheduled': _schedule_power('reboot')})
+
+
+@bp.route('/api/system/shutdown', methods=['POST'])
+def api_system_shutdown():
+    return jsonify({'success': True, 'action': 'shutdown',
+                    'scheduled': _schedule_power('poweroff')})
 
 

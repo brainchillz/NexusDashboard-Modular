@@ -19,7 +19,8 @@ def test_descriptors_registered_and_derived():
     assert ids == ['disks', 'zfs', 'lvm', 'mdraid', 'schedules', 'replication',
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
                    'instances', 'images', 'ctnetworks', 'portforward', 'docker',
-                   'compose', 'firewall', 'caddy', 'dnsmasq', 'metrics']
+                   'compose', 'firewall', 'caddy', 'dnsmasq', 'metrics',
+                   'updates']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category (split
     # from a shared 'Containers' bucket when the Docker module landed, so

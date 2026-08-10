@@ -154,6 +154,9 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl
 # Caddy module: root-owned helper — `caddy validate` before write, then reload
 # (restores the previous file if the reload is refused). Trust boundary.
 dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-caddy
+# Updates module: root-owned helper that runs the full package upgrade
+# (fixed argv, streams package-manager output for the progress view)
+dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-updates
 # Plain-disk mount: root-owned helper that mounts under /mnt|/media and edits
 # its own block in /etc/fstab (always nofail). mount/umount/tee /etc/fstab are
 # deliberately NOT granted directly.
@@ -516,6 +519,55 @@ if __name__ == '__main__':
 HELPER
 chown root:root "$CADDY_HELPER"
 chmod 755 "$CADDY_HELPER"
+
+info "Installing updates (package upgrade) helper..."
+# Root-owned: runs the full non-interactive package upgrade for the updates
+# module (apt-get dist-upgrade / dnf upgrade — family auto-detected),
+# streaming the package manager's own output for the module's progress view.
+# Fixed argv only — no user-influenced arguments cross this trust boundary.
+# NOT writable by dashboard.
+UPDATES_HELPER="/usr/local/sbin/nexus-dashboard-updates"
+cat > "$UPDATES_HELPER" << 'HELPER'
+#!/usr/bin/env python3
+# Root-owned helper for the Nexus Dashboard updates module.
+#   apply : run the full package upgrade non-interactively (apt-get
+#           dist-upgrade with kept-back conffiles / dnf -y upgrade),
+#           streaming the package manager's own output (the dashboard
+#           parses it for progress). Exits with the package manager's rc.
+# Fixed argv only — the dashboard never passes user input across this
+# boundary.
+import os
+import subprocess
+import sys
+
+
+def main():
+    if os.geteuid() != 0:
+        print('must run as root', file=sys.stderr)
+        return 2
+    if sys.argv[1:] != ['apply']:
+        print('usage: %s apply' % sys.argv[0], file=sys.stderr)
+        return 2
+    if os.path.exists('/etc/redhat-release'):
+        cmd = ['dnf', '-y', 'upgrade']
+    else:
+        os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
+        cmd = ['apt-get', '-y',
+               '-o', 'Dpkg::Options::=--force-confdef',
+               '-o', 'Dpkg::Options::=--force-confold',
+               'dist-upgrade']
+    # stdbuf keeps the child line-buffered through the pipe so progress
+    # reaches the dashboard as it happens, not in 4k bursts.
+    if os.path.exists('/usr/bin/stdbuf'):
+        cmd = ['stdbuf', '-oL', '-eL'] + cmd
+    return subprocess.call(cmd, stderr=subprocess.STDOUT)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+HELPER
+chown root:root "$UPDATES_HELPER"
+chmod 755 "$UPDATES_HELPER"
 
 info "Installing snapshot browse/restore helper..."
 SNAPFS_HELPER="/usr/local/sbin/nexus-dashboard-snap-fs"

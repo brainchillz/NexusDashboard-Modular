@@ -26,7 +26,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from .config import APP_DIR, APP_VERSION, write_json_atomic
+from .config import APP_DIR, APP_VERSION, PLATFORM, write_json_atomic
 from .runcmd import run, err
 from . import registry
 
@@ -278,7 +278,8 @@ def api_version():
     """Dashboard version + identity, for controller version-skew detection.
     Authenticated (not public) — a node only reveals its version to a caller
     holding a valid session or token."""
-    return jsonify({'version': APP_VERSION, 'fqdn': socket.getfqdn()})
+    return jsonify({'version': APP_VERSION, 'fqdn': socket.getfqdn(),
+                    'os': PLATFORM['pretty']})
 
 
 @bp.route('/api/account/password', methods=['POST'])

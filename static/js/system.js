@@ -627,3 +627,143 @@ async function notifTest() {
     $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(detail || r.error || 'failed')}</span>`;
   } catch(e) { $('nf-result').innerHTML = `<span style="color:#e66">✗ ${escapeHtml(e.message)}</span>`; }
 }
+
+// ─── System Updates (updates module) ────────────────────
+// Read-only pending-update view: counts + package table from the module's
+// cached package-manager check. "Check now" re-runs it; the page polls while
+// a check is in flight. (Applying updates is a planned later phase — it
+// needs a root helper, so this page stays a viewer for now.)
+let _updPollTimer = null;
+
+function _updAgo(ts) {
+  if (!ts) return 'never';
+  const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m ago` : `${Math.floor(h / 24)}d ago`;
+}
+
+async function page_updates() {
+  if (_updPollTimer) { clearTimeout(_updPollTimer); _updPollTimer = null; }
+  const u = await API.get('/api/updates');
+  if (currentPage !== 'updates') return;
+  const ap = u.apply || {};
+
+  if (ap.running) { renderUpdApplyProgress(ap); return; }
+
+  if (u.checking) {
+    _updPollTimer = setTimeout(() => {
+      if (currentPage === 'updates') page_updates();
+    }, 3000);
+  }
+
+  const sec = u.security || 0, avail = u.available || 0;
+  const headline = u.checking
+    ? `<div class="alert alert-info">Checking for updates (${escapeHtml(u.manager)})…</div>`
+    : u.error
+      ? `<div class="alert alert-warning"><strong>Update check failed:</strong> ${escapeHtml(u.error)}</div>`
+      : sec > 0
+        ? `<div class="alert alert-danger"><strong>${sec} security update${sec > 1 ? 's' : ''}</strong> pending (${avail} update${avail > 1 ? 's' : ''} total).</div>`
+        : avail > 0
+          ? `<div class="alert alert-warning"><strong>${avail} update${avail > 1 ? 's' : ''}</strong> available.</div>`
+          : u.checked
+            ? `<div class="health-ok">✓ System is up to date</div>`
+            : `<div class="alert alert-info">No check has run yet.</div>`;
+
+  // Result of the last apply (survives until the next one) + the
+  // authoritative post-apply reboot answer.
+  const applied = ap.rc !== null && ap.rc !== undefined && ap.finished
+    ? (ap.rc === 0
+        ? `<div class="health-ok">✓ Updates applied ${_updAgo(ap.finished)}</div>`
+        : `<div class="alert alert-danger"><strong>Apply failed</strong> (exit ${ap.rc}, ${_updAgo(ap.finished)}) — see the log below.</div>`)
+    : '';
+  const reboot = ap.reboot_required
+    ? `<div class="alert alert-warning upd-reboot-row"><span><strong>Reboot required</strong> to finish applying
+         updates (kernel/libc-level change).</span>${currentRole === 'admin'
+           ? `<button class="btn btn-sm btn-warning" onclick="updRebootModal()">Reboot now</button>` : ''}</div>`
+    : '';
+  const log = (ap.log || []).length
+    ? `<details style="margin-top:10px"><summary class="help">Last apply log (${ap.log.length} lines)</summary>
+         <pre class="upd-log">${escapeHtml(ap.log.join('\n'))}</pre></details>`
+    : '';
+
+  const rows = (u.packages || []).map(p => `<tr>
+      <td><code>${escapeHtml(p.name)}</code></td>
+      <td class="help">${escapeHtml(p.current || '—')}</td>
+      <td>${escapeHtml(p.candidate)}</td>
+      <td class="help">${escapeHtml(p.origin || '')}</td>
+      <td>${p.security ? '<span class="status-badge red">security</span> ' : ''}${p.reboot_likely ? '<span class="status-badge yellow">reboot-likely</span>' : ''}</td>
+    </tr>`).join('');
+  const table = (u.packages || []).length ? `
+    <table class="table" style="margin-top:14px">
+      <thead><tr><th>Package</th><th>Installed</th><th>Available</th><th>Source</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>` : '';
+
+  const checkBtn = currentRole === 'admin'
+    ? `<button class="btn btn-outline" id="upd-check" ${u.checking ? 'disabled' : ''}
+         onclick="updCheckNow()">Check now</button>` : '';
+  const applyBtn = (currentRole === 'admin' && avail > 0 && u.apply_available)
+    ? `<button class="btn" onclick="updApplyModal(${avail}, ${sec})">Apply all updates</button>` : '';
+  const helperNote = (currentRole === 'admin' && avail > 0 && !u.apply_available)
+    ? `<p class="help">Applying from here needs the root updates helper, which is not installed on this
+         node — re-run the installer with <code>--helpers-only</code>.</p>` : '';
+
+  $('page-content').innerHTML = `
+    <h2>Updates</h2>
+    <p class="help">Pending ${escapeHtml(u.manager)} package updates, checked against the system package
+      lists (last checked: ${_updAgo(u.checked)}). <em>reboot-likely</em> is a heuristic
+      (kernel/libc/systemd/…) — the definitive reboot answer appears after applying.</p>
+    <div class="toolbar">${applyBtn}${checkBtn}</div>
+    ${helperNote}${applied}${reboot}${headline}${log}${table}`;
+}
+
+function renderUpdApplyProgress(ap) {
+  const pct = ap.total ? Math.min(100, Math.round((ap.done / ap.total) * 100)) : 0;
+  const step = ap.total ? ` — step ${ap.done} of ${ap.total}` : '';
+  $('page-content').innerHTML = `
+    <h2>Updates</h2>
+    <div class="alert alert-info"><strong>Applying updates…</strong> started ${_updAgo(ap.started)}${step}.
+      Leave this page open or come back — progress is tracked server-side.</div>
+    ${ap.total ? usageBar(pct) : ''}
+    <pre class="upd-log" id="upd-log">${escapeHtml((ap.log || []).join('\n') || 'Waiting for package manager output…')}</pre>`;
+  const lg = $('upd-log');
+  if (lg) lg.scrollTop = lg.scrollHeight;
+  _updPollTimer = setTimeout(() => {
+    if (currentPage === 'updates') page_updates();
+  }, 2000);
+}
+
+function updApplyModal(avail, sec) {
+  openModal('Apply all updates', `
+    <div class="alert alert-warning"><strong>This upgrades ${avail} package${avail > 1 ? 's' : ''}
+      ${sec > 0 ? `(including ${sec} security update${sec > 1 ? 's' : ''}) ` : ''}on this host.</strong>
+      The package manager may restart system services while it runs, and a reboot may be
+      required afterwards — you will be told if so. The dashboard itself stays up.</div>
+    <div class="toolbar">
+      <button class="btn btn-danger" onclick="closeModal(); updApplyGo()">Apply now</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function updApplyGo() {
+  try { await API.post('/api/updates/apply', {}); } catch (e) { alert(e.message); return; }
+  page_updates();
+}
+
+function updRebootModal() {
+  openModal('Reboot to finish updates', `
+    <div class="alert alert-warning"><strong>The node reboots now.</strong> Active I/O (transfers,
+      replication, running instances) is interrupted; this page waits for the node to come back
+      and reloads automatically.</div>
+    <div class="toolbar">
+      <button class="btn btn-warning" onclick="closeModal(); powerReboot()">Reboot</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function updCheckNow() {
+  try { await API.post('/api/updates/check', {}); } catch (e) { alert(e.message); return; }
+  page_updates();
+}

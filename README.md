@@ -32,6 +32,17 @@ next restart.
   containers and VM serial + an in-browser **graphical (SPICE/VGA) console** for
   VMs (spice-html5), installable PWA, dark (burnt-orange-on-grey) and light
   themes.
+- **Patching without leaving the page** — an **Updates** module checks the
+  backend package manager (apt on Debian/Ubuntu, dnf on RHEL/Rocky) with
+  rootless read-only calls and flags the front page: amber *Updates
+  available*, red *Required Security updates available*. The System ▸ Updates
+  page lists pending packages (security and reboot-likely tagged), applies
+  them all through a root-owned fixed-argv helper with the package manager's
+  own output streamed into a live progress bar + log, then reports the
+  definitive **reboot-required** verdict — with a Reboot-now button on it.
+  Host **reboot / shutdown** live behind the power glyph in the machine strip
+  (shutdown wants the hostname typed back), and the strip names the distro
+  ("Ubuntu 26.04 LTS") right beside the hostname.
 - **Firewall without foot-guns** — the Firewall page drives ufw for simple
   inbound allow/deny, but can never block the port serving the dashboard
   itself: it is auto-allowed when enabling or defaulting to deny (without ever
@@ -125,7 +136,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 492 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 517 tests, no root/hardware needed
 ```
 
 ## Lineage

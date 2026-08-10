@@ -17,7 +17,7 @@ TEMPLATES_DIR = os.path.join(APP_DIR, 'templates')
 
 # Dashboard version. Surfaced via /api/version and /api/me so a cluster
 # controller can detect API/version skew across enrolled nodes.
-APP_VERSION = '3.0.0'
+APP_VERSION = '3.1.0'
 
 # Deployment naming prefix — systemd units (<prefix>.service, <prefix>-*.timer),
 # the root-owned sudo helpers in /usr/local/sbin, and derived sentinels like the
@@ -93,7 +93,10 @@ def write_json_atomic(path, data, mode=0o600):
 # through the code. Detect once from /etc/os-release.
 def _platform_from_osrelease(text):
     """Pure parser: given /etc/os-release contents, return
-    {family: 'debian'|'rhel', id, version}. Defaults to 'debian' when unknown."""
+    {family: 'debian'|'rhel', id, version, pretty}. Defaults to 'debian' when
+    unknown. `pretty` is the human distro string shown in the UI and surfaced
+    on /api/summary + /api/version (PRETTY_NAME, falling back to
+    NAME + VERSION_ID)."""
     data = {}
     for line in (text or '').splitlines():
         line = line.strip()
@@ -111,7 +114,10 @@ def _platform_from_osrelease(text):
         family = 'debian'
     else:
         family = 'debian'  # safe default — Ubuntu is the historical target
-    return {'family': family, 'id': osid, 'version': data.get('VERSION_ID', '')}
+    pretty = data.get('PRETTY_NAME') or ' '.join(
+        p for p in (data.get('NAME'), data.get('VERSION_ID')) if p) or 'Linux'
+    return {'family': family, 'id': osid,
+            'version': data.get('VERSION_ID', ''), 'pretty': pretty}
 
 
 def detect_platform(path='/etc/os-release'):

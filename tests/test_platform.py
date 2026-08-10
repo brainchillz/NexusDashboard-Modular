@@ -60,6 +60,17 @@ def test_ubuntu_is_debian_family():
     assert p['family'] == 'debian'
     assert p['id'] == 'ubuntu'
     assert p['version'] == '24.04'
+    assert p['pretty'] == 'Ubuntu 24.04.1 LTS'
+
+
+def test_pretty_falls_back_to_name_plus_version():
+    # ROCKY_9 has no PRETTY_NAME line — NAME + VERSION_ID is the fallback.
+    assert app._platform_from_osrelease(ROCKY_9)['pretty'] == 'Rocky Linux 9.8'
+
+
+def test_pretty_falls_back_to_linux_when_empty():
+    assert app._platform_from_osrelease('')['pretty'] == 'Linux'
+    assert app._platform_from_osrelease('ID=plan9\n')['pretty'] == 'Linux'
 
 
 def test_debian_is_debian_family():

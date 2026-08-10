@@ -20,13 +20,15 @@ def test_scan_finds_every_module_file():
         'mdraid', 'firewall', 'caddy', 'dnsmasq', 'docker', 'docker_console',
         'docker_compose', 'containers.client', 'containers.instances',
         'containers.images', 'containers.networks', 'containers.portforward',
-        'containers.console'}
+        'containers.console', 'updates'}
 
 
 def test_legacy_facade_order_reproduced():
     mods = discovery.load_builtin_modules()
     names = [m.__name__.rsplit('nexusdash.modules.', 1)[-1] for m in mods]
-    assert tuple(names) == discovery._LEGACY_FACADE_ORDER
+    # Legacy set first in the pinned order; post-3.0 module files (updates)
+    # sort after it alphabetically.
+    assert tuple(names) == discovery._LEGACY_FACADE_ORDER + ('updates',)
 
 
 def test_shape_classification():
@@ -51,7 +53,7 @@ def test_collect_descriptors_order_and_metrics_extra():
     descs = discovery.collect_descriptors(mods, extra=(metrics.MODULE,))
     ids = [d['id'] for d, _ in descs]
     assert ids == [m['id'] for m in app.MODULES]     # exact nav order
-    assert ids[-1] == 'metrics'                      # order 230 sorts it last
+    assert ids[-2:] == ['metrics', 'updates']        # orders 230, 240 sort last
     assert all(src == 'builtin' for _, src in descs)
 
 

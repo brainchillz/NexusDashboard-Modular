@@ -462,6 +462,31 @@ html.theme-light .card-link:hover { background: rgba(0,0,0,0.03); }
   font-family: var(--mono); color: var(--green);
 }
 
+/* Health line + pending-updates flag side by side (updates module) */
+.health-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 14px; }
+.health-row > .health-ok, .health-row > .alert { flex: 1; margin-bottom: 0; }
+.upd-flag {
+  display: flex; align-items: center; padding: 8px 14px; white-space: nowrap;
+  border: 1px solid var(--border-soft); border-left: 2px solid var(--yellow);
+  border-radius: var(--radius); font-size: 12.5px; font-family: var(--mono);
+  color: var(--yellow); text-decoration: none;
+}
+.upd-flag:hover { border-color: var(--text-muted); }
+.upd-flag.upd-sec { border-left-color: var(--red); color: var(--red); }
+.upd-log {
+  margin-top: 10px; padding: 10px 12px; max-height: 380px; overflow: auto;
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--bg); font-family: var(--mono); font-size: 11.5px;
+  line-height: 1.5; color: var(--text-muted); white-space: pre-wrap;
+}
+.upd-reboot-row { display: flex; align-items: center; gap: 12px; }
+.upd-reboot-row > span { flex: 1; }
+
+/* Machine-strip power control (admin): quiet glyph, colors on hover only */
+.ms-power { display: inline-flex; align-items: center; color: var(--text-muted); }
+.ms-power:hover { color: var(--red); }
+.ms-power .ico { width: 13px; height: 13px; }
+
 /* ─── Usage bars ──────────────────────── */
 .usage { display: flex; align-items: center; gap: 8px; margin: 7px 0 2px; }
 .usage-bar {

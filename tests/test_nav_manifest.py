@@ -52,6 +52,7 @@ EXPECTED_NAV = [
         ('dnsconfig', 'DNS Config', 'file', 'dnsmasq', True)]),
     ('system', 'System', [
         ('services', 'Services', 'toggle', None, False),
+        ('updates', 'Updates', 'dl', 'updates', False),
         ('tasks', 'Scheduled Tasks', 'cal', None, False),
         ('logs', 'Logs', 'log', None, False),
         ('network', 'Network', 'net', None, True),

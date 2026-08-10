@@ -372,7 +372,7 @@ function toggleTheme(e) {
 // dashboard renders; uptime/load refresh from the cheap /proc-backed
 // /api/system/resources on the same 30s interval as the dashboard.
 let appVersion = '';
-const stripInfo = { host: '', ip: '', up: null, load: null };
+const stripInfo = { host: '', os: '', ip: '', up: null, load: null };
 
 function renderMachineStrip() {
   const el = $('machine-strip');
@@ -380,11 +380,69 @@ function renderMachineStrip() {
   const t = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
   const parts = [];
   if (stripInfo.host) parts.push(`<span class="ms-host">${escapeHtml(stripInfo.host)}</span>`);
+  if (stripInfo.os) parts.push(`<span>${escapeHtml(stripInfo.os)}</span>`);
   if (stripInfo.ip) parts.push(`<span>${escapeHtml(stripInfo.ip)}</span>`);
   if (stripInfo.up != null) parts.push(`<span>up ${fmtUptime(stripInfo.up)}</span>`);
   if (stripInfo.load) parts.push(`<span>load ${stripInfo.load['1'] ?? '-'} ${stripInfo.load['5'] ?? '-'} ${stripInfo.load['15'] ?? '-'}</span>`);
   parts.push(`<span class="ms-right">${t}</span>`);
+  if (currentRole === 'admin')
+    parts.push(`<a href="#" class="ms-power" title="Power (reboot / shut down)"
+      onclick="powerModal();return false">${icon('power')}</a>`);
   el.innerHTML = parts.join('');
+}
+
+// ─── Host power (reboot / shutdown) ─────────────────────
+// POST /api/system/reboot|shutdown fire after a short server-side delay so
+// the response gets out first. Reboot waits for the node to come back;
+// shutdown is guarded by the type-the-hostname confirm (a remote node has
+// nobody to press the button).
+function powerModal() {
+  const host = stripInfo.host || location.hostname;
+  openModal('Power', `
+    <p class="help">Host power control for <code>${escapeHtml(host)}</code>.</p>
+    <div class="alert alert-warning"><strong>Reboot</strong> — the node goes down and comes back;
+      this page waits for it and reloads. Active I/O (transfers, replication, running instances) is interrupted.</div>
+    <div class="toolbar"><button class="btn btn-warning" onclick="closeModal(); powerReboot()">Reboot</button></div>
+    <div class="alert alert-danger" style="margin-top:14px"><strong>Shut down</strong> — the node powers off and
+      <em>stays off</em> until started at the machine (or via its BMC / wake-on-LAN). On a remote node
+      there may be nobody to press the button.</div>
+    <div class="toolbar"><button class="btn btn-danger" onclick="closeModal(); powerShutdownConfirm()">Shut down…</button></div>`);
+}
+
+async function powerReboot() {
+  try { await API.post('/api/system/reboot', {}); } catch (e) { alert(e.message); return; }
+  powerWait('Rebooting');
+}
+
+function powerShutdownConfirm() {
+  const host = stripInfo.host || location.hostname;
+  confirmName({
+    title: 'Shut down host', name: host,
+    warning: `<code>${escapeHtml(host)}</code> will power off and stay off — it must be started
+      at the machine (or via BMC / wake-on-LAN). This dashboard will be unreachable.`,
+    button: 'Shut down',
+    onConfirm: async () => {
+      closeModal();
+      try { await API.post('/api/system/shutdown', {}); } catch (e) { alert(e.message); return; }
+      $('page-content').innerHTML = `<h2>Shutting down</h2>
+        <div class="alert alert-danger">The node is powering off — this page will go dark in a few seconds.</div>`;
+    },
+  });
+}
+
+function powerWait(label) {
+  $('page-content').innerHTML = `<h2>${escapeHtml(label)}…</h2>
+    <div class="alert alert-info"><strong>Waiting for the node to come back.</strong>
+      The dashboard reloads automatically when it answers again (typically 1–3 minutes).</div>`;
+  const started = Date.now();
+  const t = setInterval(async () => {
+    try {
+      const r = await fetch('/api/version');
+      // Back up (200) or back up with the session lost (401) — either way, reload.
+      if (r.status === 200 || r.status === 401) { clearInterval(t); location.reload(); }
+    } catch (e) {}   // still down — keep waiting
+    if (Date.now() - started > 15 * 60 * 1000) clearInterval(t);
+  }, 5000);
 }
 
 async function refreshMachineStrip() {
@@ -625,12 +683,22 @@ async function page_dashboard() {
 
   // Feed the machine strip the identity fields only /api/summary carries.
   if (sys.hostname) stripInfo.host = sys.hostname;
+  if (sys.os) stripInfo.os = sys.os;
   if (sys.ip) stripInfo.ip = sys.ip;
   renderMachineStrip();
 
-  const health = alerts.length
+  const healthLine = alerts.length
     ? `<div class="alert alert-warning"><strong>${alerts.length} issue${alerts.length > 1 ? 's' : ''}:</strong> ${alerts.map(escapeHtml).join(' · ')}</div>`
     : `<div class="health-ok">✓ All systems healthy</div>`;
+  // Pending-updates flag beside the health line (updates module summary
+  // block; absent when the module is disabled). Security escalates the color.
+  const upd = s.updates || {};
+  const updFlag = (upd.security || 0) > 0
+    ? `<a href="#" class="upd-flag upd-sec" onclick="showPage('updates');return false">Required Security updates available</a>`
+    : (upd.available || 0) > 0
+      ? `<a href="#" class="upd-flag" onclick="showPage('updates');return false">Updates available</a>`
+      : '';
+  const health = `<div class="health-row">${healthLine}${updFlag}</div>`;
 
   // First-run welcome: no pools yet -> point at the next steps. Skipped when the
   // ZFS module is disabled (e.g. an AI-focused node has no use for a pool prompt).
