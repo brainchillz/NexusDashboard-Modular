@@ -33,6 +33,14 @@ bp = Blueprint('lvm', __name__)
 RE_LVM = re.compile(r'^[a-zA-Z0-9+_.][a-zA-Z0-9+_.-]*$')        # vg / lv names
 RE_LVSIZE = re.compile(r'^\+?[0-9]+(\.[0-9]+)?[KkMmGgTtPp]?$')  # -L sizes (and +N to extend)
 RE_LVPCT = re.compile(r'^[0-9]{1,3}%(FREE|VG)$')               # -l percentages
+# Extending accepts a leading '+' too: '+100%FREE' ADDS all free space, while
+# a bare '100%FREE' SETS the size to 100% of the free space — which silently
+# resolves to no change whenever free space happens to equal the current size
+# (lvextend then exits 0 saying "successfully resized"). Create has no such
+# ambiguity, so it keeps the plain RE_LVPCT.
+RE_LVPCT_EXT = re.compile(r'^\+?[0-9]{1,3}%(FREE|VG)$')        # -l percentages (+N to add)
+# lvextend/lvresize report a zero-change resize on stdout with rc=0.
+RE_LV_NOOP = re.compile(r'matches existing size|unchanged from', re.I)
 
 
 def _lvm_report(tool, fields):
@@ -216,16 +224,25 @@ def lvm_lv_extend(vg, name):
     size = (data.get('size') or '').strip()
     if not RE_LVM.match(vg) or not RE_LVM.match(name):
         return err('Invalid VG or LV name')
-    if RE_LVPCT.match(size):
+    if RE_LVPCT_EXT.match(size):
         cmd = ['lvextend', '-l', size]
     elif RE_LVSIZE.match(size):
         cmd = ['lvextend', '-L', size]
     else:
-        return err('Invalid size (e.g. +10G, 50G, or 100%FREE)')
+        return err('Invalid size (e.g. +10G, 50G, or +100%FREE)')
     if data.get('resize_fs'):
         cmd.append('-r')  # grow the filesystem too
     cmd.append(f'{vg}/{name}')
-    return jsonify(run_safe(cmd))  # extend (grow) only — never shrinks
+    r = run_safe(cmd)  # extend (grow) only — never shrinks
+    # A resize to the size it already is exits 0 ("successfully resized"), so
+    # success alone would report a no-op as done. Additive field — callers
+    # that ignore it see the unchanged success/stdout/stderr/returncode shape.
+    if r['success'] and RE_LV_NOOP.search((r.get('stdout') or '') + (r.get('stderr') or '')):
+        r['warning'] = (
+            f'No change: {vg}/{name} is already that size. To ADD space use a '
+            "leading '+' (e.g. +100%FREE); without it the value sets the "
+            'total size.')
+    return jsonify(r)
 
 @bp.route('/api/lvm/lv/<vg>/<name>', methods=['DELETE'])
 def lvm_lv_remove(vg, name):

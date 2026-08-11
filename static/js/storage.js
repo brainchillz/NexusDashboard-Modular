@@ -1331,15 +1331,17 @@ async function lvmDoCreateLV() {
 }
 function lvmLVExtend(vg, name) {
   openModal(`Extend ${vg}/${name}`, `
-    <div class="form-group"><label>Add / grow to size</label><input id="lv-extsize" class="form-control" placeholder="+10G, 50G, or 100%FREE"></div>
+    <div class="form-group"><label>Add / grow to size</label><input id="lv-extsize" class="form-control" placeholder="+10G, +100%FREE, or 50G"></div>
     <div class="form-group"><label><input type="checkbox" id="lv-extfs" checked> Grow the filesystem too</label></div>
-    <p class="help">Extend only — this never shrinks a volume.</p>
+    <p class="help">Extend only — this never shrinks a volume. A leading <code>+</code>
+    ADDS to the current size (<code>+100%FREE</code> uses all free space); without it
+    the value is the new TOTAL size.</p>
     <button class="btn" onclick="lvmDoLVExtend('${jsArg(vg)}','${jsArg(name)}')">Extend</button>`);
 }
 async function lvmDoLVExtend(vg, name) {
   const size = $('lv-extsize').value.trim();
   if (!size) { alert('Size required'); return; }
-  try { const r = await API.post(`/api/lvm/lv/${encodeURIComponent(vg)}/${encodeURIComponent(name)}/extend`, { size, resize_fs: $('lv-extfs').checked }); if (!r.success) { alert(r.error || r.stderr || 'Failed'); return; } closeModal(); page_lvm(); } catch(e) { alert(e.message); }
+  try { const r = await API.post(`/api/lvm/lv/${encodeURIComponent(vg)}/${encodeURIComponent(name)}/extend`, { size, resize_fs: $('lv-extfs').checked }); if (!r.success) { alert(r.error || r.stderr || 'Failed'); return; } if (r.warning) { alert(r.warning); return; } closeModal(); page_lvm(); } catch(e) { alert(e.message); }
 }
 async function lvmLVRemove(vg, name) {
   if (!confirm(`Delete logical volume ${vg}/${name}? This destroys its data.`)) return;
