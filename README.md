@@ -60,7 +60,7 @@ next restart.
 
 ```bash
 git clone https://github.com/brainchillz/NexusDashboard-Modular.git
-cd NexusDashboard-
+cd NexusDashboard-Modular
 sudo ./install-prerequisites.sh        # Debian/Ubuntu packages (single source of truth)
 sudo ./install.sh                      # user, venv, sudoers, wrappers, timers, service
 # RHEL/Rocky: use install-prerequisites-rhel.sh + install-rhel.sh
