@@ -146,7 +146,81 @@ async function page_users() {
       <tbody>${trows || '<tr><td colspan="5">No API tokens</td></tr>'}</tbody>
     </table>
     <p class="help">For automation/scripts. Send the token as <code>Authorization: Bearer &lt;token&gt;</code>
-      (or <code>X-API-Token</code>). A token carries a role (admin or read-only) and is shown only once at creation.</p>`;
+      (or <code>X-API-Token</code>). A token carries a role (admin or read-only) and is shown only once at creation.</p>
+    <h3 style="margin-top:24px">Single Sign-On</h3>
+    <div id="sso-section"><p class="help">Loading…</p></div>`;
+  renderSso();
+}
+
+// Single sign-on enrollment. Deliberately here rather than on My Account: it
+// is a node-wide identity decision, not a personal preference.
+async function renderSso() {
+  const el = $('sso-section');
+  if (!el) return;
+  let s = {};
+  try { s = await API.get('/api/sso'); } catch (e) {
+    el.innerHTML = '<p class="help">Unavailable.</p>';
+    return;
+  }
+  if (s.locked) {
+    el.innerHTML = `
+      <p>Signing in through <strong>${escapeHtml(s.issuer)}</strong> as
+         <code>${escapeHtml(s.audience)}</code>.</p>
+      <p class="help">Fixed by this host's configuration
+        (<code>/etc/nexus-dashboard.env</code>), so it cannot be changed from here.
+        Edit that file and restart the service to change or remove it.</p>`;
+    return;
+  }
+  if (s.configured) {
+    el.innerHTML = `
+      <p>Signing in through <strong>${escapeHtml(s.issuer)}</strong> as
+         <code>${escapeHtml(s.audience)}</code>.</p>
+      <p class="help">Enrolled from this page. People with an account
+        <em>on this node</em> can sign in via the issuer; it never creates
+        accounts here.</p>
+      <button class="btn btn-danger" onclick="ssoDisable()">Stop using single sign-on</button>`;
+    return;
+  }
+  el.innerHTML = `
+    <p class="help">Enroll this node with a Nexus SSO issuer so people can sign
+      in once and reach it without a second password. Generate a one-time code
+      in the issuer's own UI, then paste it here.</p>
+    <div class="form-group"><label>Issuer URL</label>
+      <input id="sso-issuer" class="form-control" placeholder="https://sso.example.com"></div>
+    <div class="form-group"><label>Enrollment code</label>
+      <input id="sso-code" class="form-control" placeholder="nxe_…" autocomplete="off"></div>
+    <button class="btn" onclick="ssoEnroll()">Enroll</button>
+    <p class="help">The code works once. Signing in here with a password keeps
+      working either way.</p>`;
+}
+
+async function ssoEnroll() {
+  const issuer = ($('sso-issuer').value || '').trim();
+  const code = ($('sso-code').value || '').trim();
+  if (!issuer || !code) { alert('Issuer URL and enrollment code are both required.'); return; }
+  try {
+    const r = await API.post('/api/sso/enroll', { issuer, code });
+    alert(`Enrolled with ${r.issuer} as "${r.audience}".`);
+    page_users();
+  } catch (err) { alert(err.message); }
+}
+
+async function ssoDisable() {
+  const password = prompt('Confirm your current password to stop using single sign-on:');
+  if (!password) return;
+  // Raw fetch: the shared API.delete helper sends no body, and this one has to
+  // carry the password confirmation.
+  try {
+    const r = await fetch('/api/sso', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.success) throw new Error(j.error || 'Could not remove');
+    alert('Single sign-on removed. Password sign-in is unaffected.');
+    page_users();
+  } catch (err) { alert(err.message); }
 }
 
 async function page_notifications() {

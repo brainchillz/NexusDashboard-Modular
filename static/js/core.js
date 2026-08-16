@@ -774,6 +774,29 @@ function adminOnlyPage(title) {
 
 
 // ─── Authentication ─────────────────────────────────────
+// Set from /api/me when this node is configured for single sign-on; null
+// otherwise, which is every node by default. Purely additive: the password
+// box below is always present, so an issuer outage never locks the node out
+// of its own UI.
+let ssoConfig = null;
+
+function ssoSignIn() {
+  const next = location.pathname + location.search + location.hash;
+  location.href = ssoConfig.issuer + '/sso/authorize?aud='
+    + encodeURIComponent(ssoConfig.audience) + '&next=' + encodeURIComponent(next);
+}
+
+function renderSsoButton() {
+  const form = $('login-form') || $('login-screen');
+  if (!ssoConfig || !form || $('sso-btn')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'sso-block';
+  wrap.innerHTML = '<div class="sso-sep"><span>or</span></div>'
+    + '<button type="button" id="sso-btn" class="btn sso-btn">Sign in with Nexus SSO</button>';
+  form.appendChild(wrap);
+  $('sso-btn').addEventListener('click', ssoSignIn);
+}
+
 function showLogin() {
   isAuthed = false;
   document.querySelector('.sidebar').style.display = 'none';
@@ -785,6 +808,18 @@ function showLogin() {
   if (sub && location.hostname) sub.textContent = location.hostname;
   $('login-screen').style.display = 'flex';
   $('login-pass').value = '';
+  renderSsoButton();
+  // A failed round trip must not bounce straight back out to the issuer, or
+  // a misconfigured pair loops forever.
+  const failed = new URLSearchParams(location.search).has('sso_error');
+  if (ssoConfig && ssoConfig.auto_redirect && !failed) { ssoSignIn(); return; }
+  if (failed) {
+    const err = $('login-error');
+    if (err) {
+      err.textContent = 'Single sign-on did not complete. Sign in below.';
+      err.style.display = 'block';
+    }
+  }
   $('login-user').focus();
 }
 
@@ -878,8 +913,11 @@ async function doChangePassword(forced) {
 async function checkAuth() {
   try {
     const r = await fetch('/api/me');
+    // `sso` is present only on nodes configured for it, and rides on the 401
+    // too so the login screen can offer it before anyone is authenticated.
+    const j = await r.json().catch(() => ({}));
+    ssoConfig = j.sso || null;
     if (!r.ok) { showLogin(); return; }
-    const j = await r.json();
     showApp(j.user, j.fqdn, j.role, j.must_change, j.version);
   } catch (err) { showLogin(); }
 }

@@ -115,6 +115,36 @@ ever executes) and a **Python** one with full module powers. See
 [PLUGINS.md](PLUGINS.md) and the worked examples in `examples/plugins/`
 (`hello-world`, `wireguard`).
 
+## Single sign-on (optional)
+
+Off unless you configure it, and an unconfigured install behaves exactly as
+one built before the feature existed. Point it at a
+[Nexus SSO](https://github.com/brainchillz/NexusSSO) issuer and you sign in
+once, then reach every enrolled app without another password.
+
+Two ways to opt in, and the **environment wins** so an operator can fix the
+decision at install time:
+
+```sh
+# host-level, read by the unit via EnvironmentFile=-/etc/nexus-dashboard.env
+DASHBOARD_SSO_ISSUER=https://sso.example.com
+DASHBOARD_SSO_PUBKEY=<base64url ed25519 public key>
+DASHBOARD_SSO_KID=<key id>
+DASHBOARD_SSO_AUDIENCE=node1
+```
+
+Leave those unset and an admin can enroll from **Users & Tokens → Single
+Sign-On** instead, by pasting a one-time code from the issuer; that route
+stores the config beside the app's own state, which is what makes it work for
+a container without editing `.env` and recreating.
+
+What it deliberately does not do: an assertion names a subject and carries no
+role, and the subject must **already have a local account here** — signing in
+through an issuer never creates users and never decides what they may do.
+Your existing accounts and API tokens are unaffected; this is a browser
+feature, and password login keeps working either way. Verification is pure
+stdlib (RFC 8032 Ed25519, verify-only), so it adds no dependency.
+
 ## Architecture (short version)
 
 ```
@@ -136,7 +166,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 534 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 570 tests, no root/hardware needed
 ```
 
 ## Lineage

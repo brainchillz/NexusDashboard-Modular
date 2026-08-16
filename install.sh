@@ -1242,6 +1242,12 @@ Group=dashboard
 WorkingDirectory=/opt/nexus-dashboard
 Environment=DASHBOARD_UNIT_PREFIX=nexus-dashboard
 Environment=FLASK_ENV=production
+# Optional host-level overrides. The leading '-' means "absent is fine", so a
+# node without the file behaves exactly as it always has. This is where an
+# operator opts the installation in to single sign-on; it is deliberately NOT
+# editable from the app's own UI, since an admin session that could repoint
+# its own issuer could hand itself a new identity provider.
+EnvironmentFile=-/etc/nexus-dashboard.env
 ExecStart=/opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py
 Restart=on-failure
 RestartSec=10
