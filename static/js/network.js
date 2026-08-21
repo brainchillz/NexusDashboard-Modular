@@ -1,3 +1,9 @@
+// Countdown timer for the network-change handoff. The declaration was lost when
+// the single-file app was split into per-page files: page_network() READS it on
+// entry, and reading an undeclared name is a ReferenceError, so the whole page
+// threw for admins on every node.
+let _netCountdown = null;
+
 async function page_network() {
   if (currentRole !== 'admin') return adminOnlyPage('Network');
   if (_netCountdown) { clearInterval(_netCountdown); _netCountdown = null; }

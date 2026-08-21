@@ -78,6 +78,15 @@ def client(monkeypatch, tmp_path):
                         lambda: {'golden': 'docker'})
     monkeypatch.setitem(app._DESCRIPTORS['dnsmasq'], 'summary',
                         lambda: {'golden': 'dnsmasq'})
+    # The NUT pair reads config off disk and shells out to `upsc`; stub both
+    # hooks so the goldens never depend on whether the machine running the
+    # suite happens to have NUT installed.
+    monkeypatch.setitem(app._DESCRIPTORS['nut'], 'alerts', lambda: [])
+    monkeypatch.setitem(app._DESCRIPTORS['upsmon'], 'alerts', lambda: [])
+    monkeypatch.setitem(app._DESCRIPTORS['nut'], 'summary',
+                        lambda: {'golden': 'nut'})
+    monkeypatch.setitem(app._DESCRIPTORS['upsmon'], 'summary',
+                        lambda: {'golden': 'upsmon'})
     app.app.config['TESTING'] = True
     return app.app.test_client()
 

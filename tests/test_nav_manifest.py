@@ -35,6 +35,10 @@ EXPECTED_NAV = [
         ('minidlna', 'DLNA Media', 'camera', 'minidlna', False)]),
     ('ai', 'AI Tools', [
         ('llamacpp', 'LLama.cpp', 'flame', 'llamacpp', False),
+        # Added post-3.0: the model library / Hugging Face downloader. A second
+        # PAGE of the llamacpp module rather than a module of its own, so it
+        # carries module='llamacpp' and is hidden by that toggle.
+        ('models', 'Models', 'dl', 'llamacpp', False),
         ('gpu', 'GPU', 'cpu', 'gpu', False)]),
     ('lxd', 'LXD / Incus', [
         ('instances', 'Instances', 'mon', 'instances', False),
@@ -50,6 +54,9 @@ EXPECTED_NAV = [
         ('dnshosts', 'DNS Overrides', 'glb', 'dnsmasq', False),
         ('dhcp', 'DHCP', 'swap', 'dnsmasq', False),
         ('dnsconfig', 'DNS Config', 'file', 'dnsmasq', True)]),
+    ('power', 'Power', [
+        ('nut', 'UPS Server', 'plug', 'nut', True),
+        ('upsmon', 'UPS Monitor', 'batt', 'upsmon', True)]),
     ('system', 'System', [
         ('services', 'Services', 'toggle', None, False),
         ('updates', 'Updates', 'dl', 'updates', False),

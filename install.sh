@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="/opt/nexus-dashboard"
+DASHBOARD_DIR="${DASHBOARD_DIR:-/opt/nexus-dashboard}"
 DASHBOARD_USER="dashboard"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8443}"
 
@@ -31,7 +31,37 @@ fi
 # line) silently leaves the old ones behind until this is run once as root.
 # Idempotent; never touches app files, the venv, module state, or services.
 # Assumes fresh-install naming (nexus-dashboard-*).
+# Helper/sudoers naming. Fresh installs are nexus-dashboard-*; nodes upgraded
+# in place from the old single-purpose dashboards keep storage-dashboard-* (the
+# app derives HELPER_PREFIX from DASHBOARD_UNIT_PREFIX, default
+# storage-dashboard). --helper-prefix lets a refresh write the names a node
+# actually uses, which is what allows helpers to be kept current EVERYWHERE
+# rather than only on fresh-prefixed nodes.
+HELPER_PREFIX="${DASHBOARD_HELPER_PREFIX:-nexus-dashboard}"
+
+# Nodes whose dashboard runs as ROOT were never given a service user (the AI
+# nodes). Every usermod/chown below must tolerate that
+# instead of aborting the whole run under `set -e` — which is exactly what a
+# helpers refresh did there, leaving the later helpers uninstalled.
+if id "$DASHBOARD_USER" >/dev/null 2>&1; then HAVE_DASH_USER=1; else HAVE_DASH_USER=0; fi
+
+dash_chown() {   # usage: dash_chown [-R] <path...>  — no-op without a service user
+    [ "$HAVE_DASH_USER" = 1 ] || return 0
+    local flags=()
+    while [ "${1:-}" = "-R" ]; do flags+=(-R); shift; done
+    chown "${flags[@]}" "$DASHBOARD_USER:$DASHBOARD_USER" "$@"
+}
+
 HELPERS_ONLY=0
+for _a in "$@"; do
+    case "$_a" in
+        --helper-prefix=*) HELPER_PREFIX="${_a#*=}" ;;
+        # A helpers refresh must be able to name the dir the node actually uses:
+        # in-place-upgraded nodes live at /opt/storage-dashboard or
+        # /opt/llama-dashboard, not the fresh-install default.
+        --app-dir=*)       DASHBOARD_DIR="${_a#*=}" ;;
+    esac
+done
 if [ "${1:-}" = "--helpers-only" ]; then
     HELPERS_ONLY=1
     if [ ! -d "$DASHBOARD_DIR" ]; then
@@ -100,7 +130,7 @@ fi   # HELPERS_ONLY: prerequisites/user/app/venv skipped
 
 info "Setting up sudoers permissions..."
 
-SUDOERS_FILE="/etc/sudoers.d/nexus-dashboard"
+SUDOERS_FILE="/etc/sudoers.d/${HELPER_PREFIX}"
 
 # Keep the working policy restorable: on upgrades (--helpers-only) a visudo
 # rejection must put the previous file back, not strip the node's grants.
@@ -173,10 +203,21 @@ dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-updates
 # not be writable by dashboard. (mount/umount/tee /etc/fstab are deliberately
 # NOT granted directly — that would be a root-escalation primitive.)
 dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-mount
-# llama.cpp model download: a root-owned helper that pulls a GGUF from Hugging
-# Face into the models dir (re-validates repo/filename, confines output to that
-# dir, atomic rename). The helper is the trust boundary — not writable by dashboard.
-dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-model-fetch
+# (llama.cpp model downloads need NO sudo: the models dir is group-writable via
+# the `models` group, so the transfer runs unprivileged. The old model-fetch
+# helper and this grant were removed deliberately.)
+# GPU tuning: root-owned helper that sets a card's power cap or power profile.
+# It re-validates both against the card's OWN reported limits; it cannot set
+# clocks, perf determinism, or partitions.
+dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-gpu-tune
+# NUT (UPS Server / UPS Monitor modules): root-owned helper that READS and
+# writes the NUT config files. They are root:nut 0640, so the dashboard user
+# cannot even read them to render a page — this helper is the only path. It
+# re-validates the file name against the five managed ones, confines the
+# target to the detected NUT config dir (/etc/nut on Debian, /etc/ups on
+# RHEL), and restores the previous file if the daemon refuses to come back
+# after applying it. Trust boundary; not writable by dashboard.
+dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-nut
 # MiniDLNA DB rebuild: a root-owned helper that stops the service, deletes files.db
 # (confined to the hard-coded cache dir), and starts (minidlna rebuilds from a full
 # scan when files.db is missing). Deleting the db as root is escalation-sensitive,
@@ -254,6 +295,11 @@ dashboard ALL=(ALL) NOPASSWD: /usr/bin/chmod 2775 -- *, /bin/chmod 2775 -- *
 dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe
 dashboard ALL=(ALL) NOPASSWD: /opt/nexus-dashboard/venv/bin/python /opt/nexus-dashboard/app.py dhcp-probe *
 SUDOERS
+# The body above is written verbatim (quoted heredoc, so nothing in it is
+# expanded); rewrite the helper paths to this node's prefix in one pass.
+if [ "$HELPER_PREFIX" != "nexus-dashboard" ]; then
+    sed -i "s|/usr/local/sbin/nexus-dashboard-|/usr/local/sbin/${HELPER_PREFIX}-|g" "$SUDOERS_FILE"
+fi
 
 chmod 440 $SUDOERS_FILE
 # Validate against THIS host's sudo before moving on — sudo flavours differ in
@@ -277,7 +323,7 @@ info "Sudoers configured at $SUDOERS_FILE (visudo-validated)"
 info "Installing disk-locate read helper..."
 # Root-owned (NOT writable by the dashboard user) so granting it via sudo is
 # safe. It only ever reads a validated device into /dev/null.
-LOCATE_HELPER="/usr/local/sbin/nexus-dashboard-locate-read"
+LOCATE_HELPER="/usr/local/sbin/${HELPER_PREFIX}-locate-read"
 cat > "$LOCATE_HELPER" << 'HELPER'
 #!/bin/sh
 # Generate read-only activity on a disk so its activity LED flashes. Reads 32MB
@@ -302,7 +348,7 @@ chmod 755 "$LOCATE_HELPER"
 info "Installing iSCSI sessions helper..."
 # Root-owned read-only helper: reports connected iSCSI initiators per target
 # from configfs (which targetcli's `sessions` misses for demo-mode sessions).
-SESSIONS_HELPER="/usr/local/sbin/nexus-dashboard-iscsi-sessions"
+SESSIONS_HELPER="/usr/local/sbin/${HELPER_PREFIX}-iscsi-sessions"
 cat > "$SESSIONS_HELPER" << 'HELPER'
 #!/bin/sh
 base=/sys/kernel/config/target/iscsi
@@ -333,7 +379,7 @@ info "Installing snapshot browse/restore helper..."
 # Root-owned helper that resolves & confines snapshot/live paths (realpath) and
 # does the read/copy as root. It is the security boundary — must be root-owned
 # and NOT writable by the dashboard user.
-SNAPFS_HELPER="/usr/local/sbin/nexus-dashboard-snap-fs"
+SNAPFS_HELPER="/usr/local/sbin/${HELPER_PREFIX}-snap-fs"
 cat > "$SNAPFS_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard snapshot browser / file restore.
@@ -472,7 +518,7 @@ info "Installing network (netplan) helper..."
 # Root-owned: writes the dashboard's netplan file, validates with `netplan
 # generate` (restores on failure so a bad config never gets applied), then
 # `netplan apply`. Only ever writes one fixed path. NOT writable by dashboard.
-NETPLAN_HELPER="/usr/local/sbin/nexus-dashboard-netplan"
+NETPLAN_HELPER="/usr/local/sbin/${HELPER_PREFIX}-netplan"
 cat > "$NETPLAN_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard network module.
@@ -536,7 +582,7 @@ info "Installing caddy (reverse proxy) helper..."
 # reloads caddy only when it is running (restoring the previous file if the
 # reload is refused, so file and running config never diverge). Also replaces/installs
 # cert/key pairs (validated + confined to /etc/caddy). NOT writable by dashboard.
-CADDY_HELPER="/usr/local/sbin/nexus-dashboard-caddy"
+CADDY_HELPER="/usr/local/sbin/${HELPER_PREFIX}-caddy"
 cat > "$CADDY_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard caddy module.
@@ -761,7 +807,7 @@ info "Installing updates (package upgrade) helper..."
 # streaming the package manager's own output for the module's progress view.
 # Fixed argv only — no user-influenced arguments cross this trust boundary.
 # NOT writable by dashboard.
-UPDATES_HELPER="/usr/local/sbin/nexus-dashboard-updates"
+UPDATES_HELPER="/usr/local/sbin/${HELPER_PREFIX}-updates"
 cat > "$UPDATES_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard updates module.
@@ -809,7 +855,7 @@ info "Installing disk mount helper..."
 # mount point to /mnt or /media, forces a safe fstab option set (always
 # `nofail`, so a missing/yanked disk can NEVER block boot), and only ever edits
 # its own delimited block in /etc/fstab. NOT writable by the dashboard user.
-MOUNT_HELPER="/usr/local/sbin/nexus-dashboard-mount"
+MOUNT_HELPER="/usr/local/sbin/${HELPER_PREFIX}-mount"
 cat > "$MOUNT_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard plain-disk mount feature.
@@ -979,23 +1025,25 @@ HELPER
 chown root:root "$MOUNT_HELPER"
 chmod 755 "$MOUNT_HELPER"
 
-info "Installing llama.cpp model-fetch helper..."
-# Root-owned: the trust boundary for downloading a GGUF into the root-owned
-# models dir. It re-validates the repo id + filename, confines output to the
-# models dir, downloads to a .partial then atomically renames. The optional HF
-# token is read from stdin and passed to curl via an inline config so it never
-# lands on the process command line. NOT writable by the dashboard user.
-MODEL_FETCH_HELPER="/usr/local/sbin/nexus-dashboard-model-fetch"
-cat > "$MODEL_FETCH_HELPER" << 'HELPER'
+info "Installing GPU tuning helper..."
+# Root-owned: the trust boundary for changing a GPU's power cap or power
+# profile. Only two verbs, and it re-validates BOTH against the card's OWN
+# reported limits rather than trusting the caller — the dashboard's checks are
+# a UI convenience, this is the guard. Deliberately cannot set clocks, perf
+# determinism, or partitions.
+GPU_TUNE_HELPER="/usr/local/sbin/${HELPER_PREFIX}-gpu-tune"
+cat > "$GPU_TUNE_HELPER" << 'HELPER'
 #!/usr/bin/env python3
-# Root-owned helper for the Nexus Dashboard llama.cpp model download.
-#   nexus-dashboard-model-fetch <repo> <filename.gguf>
-# An optional Hugging Face token may be supplied on the first line of stdin.
-import os, re, sys, subprocess
+# Root-owned helper for Nexus Dashboard GPU tuning.
+#   <helper> power-cap <gpu-index> <watts>
+#   <helper> profile   <gpu-index> <PROFILE_NAME>
+# Both are instantly reversible and safe on a busy GPU. Anything that can wedge
+# a running inference job (clock limits, perf determinism) is NOT implemented.
+import json, re, shutil, subprocess, sys
 
-MODELS = '/usr/share/models'   # the ONLY directory this helper will write
-RE_REPO = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
-RE_FILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*\.gguf$')
+RE_IDX = re.compile(r'^[0-9]{1,2}$')
+RE_WATTS = re.compile(r'^[0-9]{1,4}$')
+RE_PROFILE = re.compile(r'^[A-Z0-9_]{1,32}$')
 
 
 def die(m, c=2):
@@ -1003,53 +1051,396 @@ def die(m, c=2):
     sys.exit(c)
 
 
-def main():
-    if len(sys.argv) != 3:
-        die('usage: nexus-dashboard-model-fetch <repo> <filename.gguf>')
-    repo, fn = sys.argv[1], sys.argv[2]
-    if not RE_REPO.match(repo):
-        die('invalid repo')
-    if not RE_FILE.match(fn):
-        die('invalid filename')
-    token = ''
-    try:
-        if not sys.stdin.isatty():
-            token = sys.stdin.readline().strip()
-    except Exception:
-        token = ''
-    dest = os.path.join(MODELS, fn)
-    # Confinement: dest must resolve to a file directly inside MODELS.
-    if os.path.dirname(os.path.realpath(dest)) != os.path.realpath(MODELS):
-        die('path escapes models dir')
-    if os.path.exists(dest):
-        die('already exists', 1)
-    os.makedirs(MODELS, exist_ok=True)
-    part = dest + '.partial'
-    url = 'https://huggingface.co/%s/resolve/main/%s' % (repo, fn)
-    # curl reads options (incl. the auth header) from stdin so the token is never
-    # visible in the process list.
-    cfg = 'url = "%s"\noutput = "%s"\nfail\nlocation\nretry = 3\n' % (url, part)
-    if token:
-        cfg += 'header = "Authorization: Bearer %s"\n' % token
-    try:
-        r = subprocess.run(['curl', '-K', '-'], input=cfg, text=True)
-    except FileNotFoundError:
-        die('curl not found', 1)
-    if r.returncode != 0:
+def tool(name):
+    p = shutil.which(name)
+    if p:
+        return p
+    for d in ('/opt/rocm/bin',):
+        c = d + '/' + name
         try:
-            os.remove(part)
+            with open(c):
+                return c
         except OSError:
             pass
-        die('download failed (curl exit %d)' % r.returncode, 1)
-    os.replace(part, dest)
-    print('ok')
+    return None
+
+
+def amd_static():
+    t = tool('amd-smi')
+    if not t:
+        return None, None
+    r = subprocess.run([t, 'static', '--json'], capture_output=True, text=True)
+    if r.returncode != 0:
+        die('amd-smi could not read the GPU: ' + (r.stderr or '').strip()[-200:], 1)
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        die('amd-smi returned unparseable output', 1)
+    if isinstance(d, dict):
+        d = d.get('gpu_data', d)
+    return t, (d if isinstance(d, list) else [])
+
+
+def amd_entry(entries, idx):
+    for e in entries:
+        if str(e.get('gpu')) == idx:
+            return e
+    die('no such GPU: %s' % idx)
+
+
+def main():
+    if len(sys.argv) != 4:
+        die('usage: gpu-tune <power-cap|profile> <gpu-index> <value>')
+    verb, idx, val = sys.argv[1], sys.argv[2], sys.argv[3]
+    if not RE_IDX.match(idx):
+        die('invalid gpu index')
+
+    nv = tool('nvidia-smi')
+    if nv and not tool('amd-smi'):
+        if verb != 'power-cap':
+            die('only power-cap is supported on NVIDIA')
+        if not RE_WATTS.match(val):
+            die('invalid watts')
+        r = subprocess.run([nv, '-i', idx, '-pl', val], capture_output=True, text=True)
+        if r.returncode != 0:
+            die((r.stderr or r.stdout).strip()[-200:], 1)
+        print((r.stdout or 'ok').strip()[-200:])
+        return
+
+    t, entries = amd_static()
+    if not t:
+        die('no supported GPU tool (amd-smi / nvidia-smi) on this host', 1)
+    e = amd_entry(entries, idx)
+
+    if verb == 'power-cap':
+        if not RE_WATTS.match(val):
+            die('invalid watts')
+        ppt0 = ((e.get('limit') or {}).get('ppt0') or {})
+        def num(x):
+            return x.get('value') if isinstance(x, dict) else None
+        lo, hi = num(ppt0.get('min_power_limit')), num(ppt0.get('max_power_limit'))
+        if lo is None or hi is None:
+            die('this GPU does not expose a settable power cap', 1)
+        w = int(val)
+        # Re-checked HERE against the card's own limits: the caller does not
+        # get to define the safe range.
+        if w < int(lo) or w > int(hi):
+            die('power cap %dW is outside this card\'s range %d-%dW' % (w, lo, hi))
+        args = [t, 'set', '-g', idx, '-o', str(w)]
+    elif verb == 'profile':
+        if not RE_PROFILE.match(val):
+            die('invalid profile name')
+        avail = ((e.get('profile') or {}).get('available_profiles') or [])
+        if val not in avail:
+            die('profile %s is not offered by this card (%s)' % (val, ','.join(map(str, avail))))
+        args = [t, 'set', '-g', idx, '-P', val]
+    else:
+        die('unknown verb: %s' % verb)
+
+    r = subprocess.run(args, capture_output=True, text=True)
+    if r.returncode != 0:
+        die((r.stderr or r.stdout).strip()[-200:], 1)
+    print((r.stdout or 'ok').strip()[-200:])
 
 
 if __name__ == '__main__':
     main()
 HELPER
-chown root:root "$MODEL_FETCH_HELPER"
-chmod 755 "$MODEL_FETCH_HELPER"
+chown root:root "$GPU_TUNE_HELPER"
+chmod 755 "$GPU_TUNE_HELPER"
+
+# GPU telemetry via amd-smi needs /dev/kfd + /dev/dri/renderD*, which are
+# render-group owned. rocm-smi reads sysfs and never needed this, which is why
+# the GPU page worked without it; the tunables page does not.
+if getent group render >/dev/null 2>&1; then
+    if [ "$HAVE_DASH_USER" = 1 ] && ! id -nG "$DASHBOARD_USER" | tr ' ' '\n' | grep -qx render; then
+        usermod -aG render "$DASHBOARD_USER"
+        warn "  $DASHBOARD_USER joined render (GPU tunables) — RESTART the dashboard"
+        warn "  for it to take effect (group membership is read at process start)."
+    else
+        info "  render group membership already correct"
+    fi
+else
+    info "  no render group on this host (no GPU driver) — skipping"
+fi
+
+info "Installing NUT (UPS) helper..."
+# Root-owned: the NUT config files are root:nut 0640, so the dashboard user
+# cannot read them at all, let alone write them. This helper is the whole
+# privileged surface of the UPS Server / UPS Monitor pages — it reads the five
+# managed files, and replaces ONE of them at a time, applying it to the units
+# that consume it and restoring the previous file if a daemon that was running
+# fails to come back. NOT writable by dashboard.
+NUT_HELPER="/usr/local/sbin/${HELPER_PREFIX}-nut"
+cat > "$NUT_HELPER" << 'HELPER'
+#!/usr/bin/env python3
+# Root-owned helper for the Nexus Dashboard nut / upsmon modules.
+#
+#   read                 print JSON {"conf_dir": ..., "files": {name: text}}
+#                        for the managed NUT config files that exist. They are
+#                        root:nut 0640, so the dashboard user cannot read them
+#                        directly; this is the only way the pages can render.
+#   write <name>         (file content on stdin) replace ONE managed file:
+#                        write atomically beside the target with owner/mode
+#                        preserved, apply it to the units that consume it, and
+#                        RESTORE the previous file (exiting non-zero) if a unit
+#                        that was running before refuses to come back.
+#
+# Trust boundary. The caller is the dashboard, which validates fields for the
+# UI; this helper re-validates independently: <name> must be one of the five
+# managed files, the target is realpath-confined to the detected NUT config
+# dir, content is size-capped and NUL-free. It can write nothing else, and it
+# runs no command that is not fixed argv.
+#
+# What "apply" means per file (chosen from NUT's own reload semantics, not
+# guessed — a reload that silently does not apply is worse than a restart):
+#   nut.conf     MODE decides which daemons run at all. Only units that are
+#                ALREADY running are restarted; starting a newly-enabled
+#                daemon is an explicit action on the Services page.
+#   ups.conf     device sections become driver processes: re-run the driver
+#                enumerator where it exists, restart the driver target, then
+#                reload upsd.
+#   upsd.conf    LISTEN sockets are bound at start, so `upsd -c reload` would
+#                NOT pick up an address change -> restart.
+#   upsd.users   credentials only -> reload is enough and keeps clients up.
+#   upsmon.conf  `upsmon -c reload` does not apply MONITOR/RUN_AS_USER
+#                changes -> restart, so a saved change is really in effect.
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+MANAGED = ('nut.conf', 'ups.conf', 'upsd.conf', 'upsd.users', 'upsmon.conf')
+CONF_DIR_CANDIDATES = ('/etc/nut', '/etc/ups', '/usr/local/etc/nut',
+                       '/usr/local/ups/etc')
+BACKUP_DIR = '/run'
+MAX_BYTES = 256 * 1024
+
+SERVER = 'nut-server.service'
+MONITOR = 'nut-monitor.service'
+ENUMERATOR = 'nut-driver-enumerator.service'
+DRIVER_TARGET = 'nut-driver.target'
+
+
+def die(msg, code=1):
+    sys.stderr.write(msg if msg.endswith('\n') else msg + '\n')
+    sys.exit(code)
+
+
+def conf_dir():
+    for d in CONF_DIR_CANDIDATES:
+        if any(os.path.exists(os.path.join(d, f)) for f in MANAGED):
+            return d
+    for d in CONF_DIR_CANDIDATES:
+        if os.path.isdir(d):
+            return d
+    return None
+
+
+def sysctl(*args):
+    return subprocess.run(['systemctl'] + list(args),
+                          capture_output=True, text=True)
+
+
+def unit_exists(unit):
+    r = sysctl('cat', unit)
+    return r.returncode == 0
+
+
+def is_active(unit):
+    return sysctl('is-active', '--quiet', unit).returncode == 0
+
+
+def do_read():
+    d = conf_dir()
+    if not d:
+        die('no NUT configuration directory found (%s)'
+            % ', '.join(CONF_DIR_CANDIDATES))
+    files = {}
+    for name in MANAGED:
+        path = os.path.join(d, name)
+        try:
+            with open(path, encoding='utf-8', errors='replace') as f:
+                files[name] = f.read()
+        except OSError:
+            continue
+    json.dump({'conf_dir': d, 'files': files}, sys.stdout)
+    sys.stdout.write('\n')
+
+
+def plan(name):
+    """[(unit, action)] for a file, filtered to units that exist. 'restart'
+    entries only fire for units already running (see the header note)."""
+    if name == 'nut.conf':
+        steps = [(ENUMERATOR, 'restart'), (DRIVER_TARGET, 'restart'),
+                 (SERVER, 'restart'), (MONITOR, 'restart')]
+    elif name == 'ups.conf':
+        steps = [(ENUMERATOR, 'restart'), (DRIVER_TARGET, 'restart'),
+                 (SERVER, 'reload')]
+    elif name == 'upsd.conf':
+        steps = [(SERVER, 'restart')]
+    elif name == 'upsd.users':
+        steps = [(SERVER, 'reload')]
+    else:                       # upsmon.conf
+        steps = [(MONITOR, 'restart')]
+    return [(u, a) for u, a in steps if unit_exists(u)]
+
+
+def apply(name, steps, was_active):
+    """Run the plan. Returns an error string, or None on success."""
+    for unit, action in steps:
+        if not was_active.get(unit):
+            continue            # not running: the new file is read at next start
+        verb = 'reload' if action == 'reload' else 'restart'
+        r = sysctl(verb, unit)
+        if r.returncode != 0:
+            return '%s %s failed:\n%s' % (verb, unit, (r.stderr or r.stdout).strip())
+    for unit, _a in steps:
+        if was_active.get(unit) and not is_active(unit):
+            j = subprocess.run(['journalctl', '-u', unit, '-n', '20',
+                                '--no-pager'], capture_output=True, text=True)
+            return ('%s did not come back after applying %s:\n%s'
+                    % (unit, name, (j.stdout or '').strip()[-1500:]))
+    return None
+
+
+def do_write(name):
+    if name not in MANAGED:
+        die('refusing to write %r — not a managed NUT config file' % name, 2)
+    d = conf_dir()
+    if not d:
+        die('no NUT configuration directory found — is NUT installed?', 2)
+    target = os.path.join(d, name)
+    if os.path.realpath(os.path.dirname(target)) != os.path.realpath(d):
+        die('target escapes %s' % d, 2)
+
+    data = sys.stdin.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        die('content exceeds %d bytes' % MAX_BYTES, 2)
+    if '\x00' in data:
+        die('content contains NUL bytes', 2)
+    if not data.endswith('\n'):
+        data += '\n'
+
+    # Owner/mode come from the file being replaced (root:nut 0640 as packaged);
+    # a file that does not exist yet inherits them from a sibling, so a created
+    # upsd.users is never left world-readable with a password in it.
+    prev = None
+    try:
+        with open(target, encoding='utf-8', errors='replace') as f:
+            prev = f.read()
+        st = os.stat(target)
+        uid, gid, mode = st.st_uid, st.st_gid, st.st_mode & 0o777
+    except OSError:
+        uid = gid = 0
+        mode = 0o640
+        for sib in MANAGED:
+            try:
+                st = os.stat(os.path.join(d, sib))
+            except OSError:
+                continue
+            uid, gid, mode = st.st_uid, st.st_gid, st.st_mode & 0o777
+            break
+
+    steps = plan(name)
+    was_active = {u: is_active(u) for u, _a in steps}
+
+    if prev is not None:
+        bpath = os.path.join(BACKUP_DIR, 'nexus-dashboard-nut.%s.prev' % name)
+        fd = os.open(bpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(prev)
+
+    fd, tmp = tempfile.mkstemp(prefix='.nexus-nut.', dir=d)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(data)
+        os.chown(tmp, uid, gid)
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+        tmp = None
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
+
+    problem = apply(name, steps, was_active)
+    if problem is None:
+        print('applied %s' % name)
+        return
+
+    if prev is None:
+        os.remove(target)
+        restored = '%s removed again' % name
+    else:
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f:
+            f.write(prev)
+        os.chown(target, uid, gid)
+        restored = 'previous %s restored' % name
+    apply(name, steps, was_active)
+    die('%s\n(%s)' % (problem, restored))
+
+
+def main():
+    if len(sys.argv) < 2:
+        die('usage: %s read | write <%s>' % (sys.argv[0], '|'.join(MANAGED)), 2)
+    verb = sys.argv[1]
+    if verb == 'read' and len(sys.argv) == 2:
+        do_read()
+    elif verb == 'write' and len(sys.argv) == 3:
+        do_write(sys.argv[2])
+    else:
+        die('usage: %s read | write <%s>' % (sys.argv[0], '|'.join(MANAGED)), 2)
+
+
+if __name__ == '__main__':
+    main()
+HELPER
+chown root:root "$NUT_HELPER"
+chmod 755 "$NUT_HELPER"
+
+info "Setting up the llama.cpp models directory..."
+# Group-writable models dir: the dashboard downloads GGUFs straight into it, so
+# there is NO root in the download path. A dedicated `models` group (rather than
+# the service's own) means an unprivileged llama-server, or an operator's shell
+# account, can be added later without widening the dashboard group. The setgid
+# bit makes anything created inside inherit the group.
+#
+# This REPLACED a root-owned model-fetch helper. Two reasons: fetching hundreds
+# of gigabytes of remote content as root was the worse trade, and helper updates
+# cannot be pushed by `fleet-deploy --helpers` to legacy-prefixed nodes, which is
+# most of the AI fleet. Any previously installed helper and its sudo grant are
+# removed below so an unused root path does not linger.
+MODELS_DIR="${DASHBOARD_MODELS_DIR:-/usr/share/models}"
+MODELS_GROUP="models"
+if ! getent group "$MODELS_GROUP" >/dev/null 2>&1; then
+    groupadd --system "$MODELS_GROUP"
+    info "  created the $MODELS_GROUP group"
+fi
+if [ "$HAVE_DASH_USER" = 0 ]; then
+    info "  no $DASHBOARD_USER user here (the service runs as root) — no group join needed"
+elif ! id -nG "$DASHBOARD_USER" | tr ' ' '\n' | grep -qx "$MODELS_GROUP"; then
+    usermod -aG "$MODELS_GROUP" "$DASHBOARD_USER"
+    # Supplementary groups are read at process start, so a running dashboard
+    # keeps its old set until it is restarted. Say so: silently deferring the
+    # capability until the next unrelated restart is how this becomes a
+    # "downloads mysteriously fail with EACCES" ticket.
+    warn "  $DASHBOARD_USER joined $MODELS_GROUP — RESTART the dashboard service"
+    warn "  for it to take effect (group membership is read at process start)."
+fi
+mkdir -p "$MODELS_DIR"
+chgrp "$MODELS_GROUP" "$MODELS_DIR"
+chmod 2775 "$MODELS_DIR"
+info "  $MODELS_DIR is group-writable by $MODELS_GROUP (setgid 2775)"
+# Retire the superseded root helper (idempotent; absent on a fresh install).
+for _old in /usr/local/sbin/nexus-dashboard-model-fetch \
+            /usr/local/sbin/storage-dashboard-model-fetch; do
+    if [ -e "$_old" ]; then
+        rm -f "$_old"
+        info "  removed the superseded root helper $_old"
+    fi
+done
 
 info "Installing MiniDLNA rebuild helper..."
 # Root-owned (NOT writable by the dashboard user) so granting it via sudo is not
@@ -1057,7 +1448,7 @@ info "Installing MiniDLNA rebuild helper..."
 # files.db (confined to the hard-coded cache dir), run `minidlnad -R`, start. The
 # cache dir is a constant here (never taken from argv) so the grant can't be abused
 # to delete arbitrary files as root.
-DLNA_RESCAN_HELPER="/usr/local/sbin/nexus-dashboard-dlna-rescan"
+DLNA_RESCAN_HELPER="/usr/local/sbin/${HELPER_PREFIX}-dlna-rescan"
 cat > "$DLNA_RESCAN_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard MiniDLNA database rebuild.
@@ -1106,7 +1497,7 @@ info "Installing MiniDLNA stats helper..."
 # distros, so the dashboard user can't read files.db directly. This opens it
 # read-only and prints fixed media-library COUNTs as JSON — no writes, no arbitrary
 # SQL. NOT writable by the dashboard user.
-DLNA_STATS_HELPER="/usr/local/sbin/nexus-dashboard-dlna-stats"
+DLNA_STATS_HELPER="/usr/local/sbin/${HELPER_PREFIX}-dlna-stats"
 cat > "$DLNA_STATS_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned read helper for the Nexus Dashboard MiniDLNA library stats.
@@ -1161,7 +1552,7 @@ chmod 755 "$DLNA_STATS_HELPER"
 
 info "Setting up log directory..."
 mkdir -p /var/log/nexus-dashboard
-chown $DASHBOARD_USER:$DASHBOARD_USER /var/log/nexus-dashboard
+dash_chown /var/log/nexus-dashboard
 
 info "Setting up dnsmasq (DNS & DHCP) module directories..."
 # The module is OFF by default; these dirs are its workspace when enabled. The
@@ -1170,7 +1561,7 @@ info "Setting up dnsmasq (DNS & DHCP) module directories..."
 # can create them on an upgraded node without leaving root-owned dirs behind.
 mkdir -p "$DASHBOARD_DIR/dnsmasq/render/dnsmasq.d" "$DASHBOARD_DIR/dnsmasq/render/hosts.d" \
          "$DASHBOARD_DIR/dnsmasq/state" "$DASHBOARD_DIR/dnsmasq/leases"
-chown -R $DASHBOARD_USER:$DASHBOARD_USER "$DASHBOARD_DIR/dnsmasq"
+dash_chown -R "$DASHBOARD_DIR/dnsmasq"
 if command -v dnsmasq >/dev/null 2>&1; then
     mkdir -p /etc/dnsmasq.d
     cat > /etc/dnsmasq.d/zz-nexus-dashboard.conf << DROPIN
@@ -1222,7 +1613,7 @@ else
 fi
 
 info "Setting file ownership..."
-chown -R $DASHBOARD_USER:$DASHBOARD_USER $DASHBOARD_DIR
+dash_chown -R $DASHBOARD_DIR
 # plugins/ stays root-owned: plugins are installed by root over SSH,
 # never writable by the service user (see PLUGINS.md).
 mkdir -p "$DASHBOARD_DIR/plugins"

@@ -47,6 +47,8 @@ storagedash_service_up{service="dnsmasq"} 0
 storagedash_service_up{service="docker"} 0
 storagedash_service_up{service="firewall"} 0
 storagedash_service_up{service="instances"} 0
+storagedash_service_up{service="nut"} 0
+storagedash_service_up{service="upsmon"} 0
 # HELP storagedash_nfs_exports Configured NFS exports
 # TYPE storagedash_nfs_exports gauge
 storagedash_nfs_exports 0

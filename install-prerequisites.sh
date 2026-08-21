@@ -37,6 +37,7 @@ PACKAGES=(
     targetcli-fb       # targetcli         -> iSCSI (LIO) targets
     nfs-kernel-server  # exportfs, nfsd    -> NFS exports
     nfs-common         # NFS client utilities
+    rsync              # model backup/restore to a shared location
     samba              # smbd, smbpasswd, pdbedit, smbstatus, testparm -> SMB shares
     smbclient          # SMB client tools
     cifs-utils         # mount.cifs

@@ -56,6 +56,7 @@ PACKAGES=(
     targetcli                # iSCSI (LIO) targets
     python3-rtslib           # rtslib backing targetcli (saveconfig)
     nfs-utils                # exportfs, nfsd, nfsdclnts -> NFS exports
+    rsync              # model backup/restore to a shared location
     samba                    # smbd/smbpasswd/pdbedit/smbstatus/testparm -> SMB
     samba-client             # smbclient
     cifs-utils               # mount.cifs

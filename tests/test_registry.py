@@ -20,7 +20,7 @@ def test_descriptors_registered_and_derived():
                    'maintenance', 'iscsi', 'nfs', 'smb', 'minidlna', 'llamacpp', 'gpu',
                    'instances', 'images', 'ctnetworks', 'portforward', 'docker',
                    'compose', 'firewall', 'caddy', 'dnsmasq', 'metrics',
-                   'updates']
+                   'updates', 'nut', 'upsmon']
     assert app.MODULE_IDS == set(ids)
     # The containers group registered with the right nav category (split
     # from a shared 'Containers' bucket when the Docker module landed, so
@@ -88,12 +88,12 @@ def test_module_hooks_skip_disabled(monkeypatch):
     calls = []
     desc = registry._DESCRIPTORS['zfs']
     monkeypatch.setitem(desc, 'alerts', lambda: calls.append('zfs') or [{'key': 'k', 'message': 'm'}])
-    # firewall and dnsmasq ship real alerts hooks — disable them so only the
-    # injected zfs hook is in play.
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall', 'dnsmasq'})
+    # firewall, dnsmasq, nut and upsmon ship real alerts hooks — disable them
+    # so only the injected zfs hook is in play.
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall', 'dnsmasq', 'nut', 'upsmon'})
     got = list(registry.module_hooks('alerts'))
     assert [mid for mid, _ in got] == ['zfs']
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall', 'dnsmasq'})
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall', 'dnsmasq', 'nut', 'upsmon'})
     assert list(registry.module_hooks('alerts')) == []
     monkeypatch.delitem(desc, 'alerts')
 
@@ -111,7 +111,12 @@ def test_finalize_idempotent_and_seed_ordered():
     assert app.MANAGED_TASKS is tasks_obj
     assert {k: dict(v) for k, v in app.SYSTEM_SERVICES.items()} == before_services
     assert [dict(t) for t in app.MANAGED_TASKS] == before_tasks
-    assert tuple(app.SYSTEM_SERVICES) == svc._SERVICE_SEED_ORDER
+    # The seed list is the byte-significant PREFIX; services contributed by
+    # modules registered after it follow in registration order.
+    seed = svc._SERVICE_SEED_ORDER
+    keys = tuple(app.SYSTEM_SERVICES)
+    assert keys[:len(seed)] == seed
+    assert keys[len(seed):] == ('nut', 'upsmon')
     assert [t['id'] for t in app.MANAGED_TASKS] == [
         'autosnap', 'replicate', 'alerts', 'maintenance', 'history']
 

@@ -528,7 +528,7 @@ async function fillResourceSparks() {
 // BUILTIN_CARD_ORDER is ordering data, not wiring — plugin cards need no
 // edit here; they append after, in manifest order.
 const BUILTIN_CARD_ORDER = ['zfs', 'iscsi', 'nfs', 'smb', 'disks',
-                            'llamacpp', 'gpu', 'minidlna'];
+                            'llamacpp', 'gpu', 'minidlna', 'upsmon'];
 
 function dashcard_zfs(ctx) {
   const z = ctx.s.zfs || {}, dot = ctx.dot;

@@ -2,10 +2,10 @@
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
-(llama.cpp, GPU), **containers & VMs** (LXD/Incus), **DNS/DHCP** (dnsmasq), and
-**system management** (network/netplan, host firewall (ufw), services, logs,
-scheduled tasks, alerting, metrics, history) — one app, one login, one audit
-trail per node.
+(llama.cpp, GPU), **containers & VMs** (LXD/Incus), **DNS/DHCP** (dnsmasq),
+**UPS/power** (NUT), and **system management** (network/netplan, host firewall
+(ufw), services, logs, scheduled tasks, alerting, metrics, history) — one app,
+one login, one audit trail per node.
 
 This is the merger of the single-file *Storage/Nexus Dashboard* and the
 *Nexus Containers* (LXD) console into one package-structured Flask app.
@@ -43,6 +43,27 @@ next restart.
   Host **reboot / shutdown** live behind the power glyph in the machine strip
   (shutdown wants the hostname typed back), and the strip names the distro
   ("Ubuntu 26.04 LTS") right beside the hostname.
+- **UPS monitoring that matches how NUT is actually deployed** — Network UPS
+  Tools splits across machines, so it is two modules with two toggles. **UPS
+  Server** manages the node the UPS is cabled to (devices and their drivers,
+  who may connect, the users clients authenticate as); **UPS Monitor** manages
+  every node that UPS feeds — what it watches, when it shuts itself down, and
+  which of the sixteen power events log, wall or run a command. A client node
+  enables one of them, not both. Battery charge, runtime and load come from
+  `upsc` and need no privileges at all, so the dashboard card, the history
+  graphs and the on-battery alerts work on a node with no access to a single
+  NUT config file. Config edits merge rather than regenerate, so hand-written
+  `upssched` wiring and vendor driver parameters survive a save, and passwords
+  are write-only: the API reports only that one is set, and leaving the field
+  blank keeps the stored value.
+- **GPU power tuning, scoped to what the silicon reports** — the GPU page reads
+  each card's own limits and offers exactly two controls: a **power cap** and a
+  **power profile**, both instantly reversible and safe to change while a model
+  is loaded. Clock limits and performance determinism are deliberately left out
+  (they can destabilise a running inference job), and controls a card reports as
+  unsupported are not drawn at all rather than shown broken. Writes go through a
+  root-owned helper that re-validates the value against the card's own reported
+  range — the UI's checks are convenience, the helper is the boundary.
 - **Firewall without foot-guns** — the Firewall page drives ufw for simple
   inbound allow/deny, but can never block the port serving the dashboard
   itself: it is auto-allowed when enabling or defaulting to deny (without ever
@@ -153,7 +174,7 @@ nexusdash/
   core/                 # auth/RBAC/tokens, audit, TLS, registry, aggregators
   modules/              # disks zfs lvm mdraid schedules replication maintenance
                         # iscsi nfs smb minidlna llama gpu firewall caddy dnsmasq
-                        # docker network logs
+                        # docker docker_compose updates nut upsmon network logs
   modules/containers/   # LXD/Incus: instances, images, networks, port-forward, console
 static/js/*.js          # per-category frontend, no build step
 ```
@@ -166,7 +187,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 570 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 706 tests, no root/hardware needed
 ```
 
 ## Lineage
