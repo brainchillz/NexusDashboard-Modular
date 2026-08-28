@@ -166,7 +166,7 @@ def test_dnf_progress():
 def _reset_apply():
     upd._apply.update({'running': False, 'rc': None, 'started': None,
                        'finished': None, 'log': [], 'done': 0, 'total': 0,
-                       'reboot_required': None})
+                       'reboot_required': None, 'security': False})
 
 
 def test_apply_thread_streams_and_finishes(monkeypatch):
@@ -237,3 +237,91 @@ def test_apply_requires_admin(client, monkeypatch):
     monkeypatch.setattr(app, '_resolve_identity', lambda: ('viewer', 'readonly'))
     r = client.post('/api/updates/apply')
     assert r.status_code == 403
+
+
+def test_apply_thread_passes_the_helper_mode(monkeypatch):
+    """The security apply is one fixed argv away from the full one — the
+    package list never crosses the helper boundary."""
+    seen = []
+
+    class FakeProc:
+        stdout = []
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    saved = dict(upd._apply)
+    try:
+        monkeypatch.setattr(upd.subprocess, 'Popen',
+                            lambda argv, **k: (seen.append(argv), FakeProc())[1])
+        monkeypatch.setattr(upd, '_refresh', lambda: None)
+        monkeypatch.setattr(upd, '_reboot_required', lambda: False)
+        _reset_apply()
+        upd._apply_thread('apply-security')
+        assert seen[0][-1] == 'apply-security'
+        _reset_apply()
+        upd._apply_thread()
+        assert seen[1][-1] == 'apply'
+    finally:
+        upd._apply.clear()
+        upd._apply.update(saved)
+
+
+def test_apply_security_refused_when_no_security_pending(client, monkeypatch):
+    monkeypatch.setattr(upd, 'UPDATES_HELPER', __file__)   # exists
+    monkeypatch.setitem(upd._state, 'available', 4)
+    monkeypatch.setitem(upd._state, 'security', 0)
+    monkeypatch.setitem(upd._state, 'checking', False)
+    r = client.post('/api/updates/apply', json={'security': True})
+    assert r.status_code == 400
+    assert 'no security' in r.get_json()['error']
+
+
+def test_apply_security_starts_and_sizes_the_progress_bar(client, monkeypatch):
+    started = []
+    monkeypatch.setattr(upd, 'UPDATES_HELPER', __file__)
+    monkeypatch.setitem(upd._state, 'available', 9)
+    monkeypatch.setitem(upd._state, 'security', 3)
+    monkeypatch.setitem(upd._state, 'checking', False)
+    monkeypatch.setattr(upd.threading, 'Thread',
+                        lambda **kw: started.append(kw) or type(
+                            'T', (), {'start': lambda self: None})())
+    saved = dict(upd._apply)
+    try:
+        r = client.post('/api/updates/apply', json={'security': True})
+        assert r.status_code == 200 and r.get_json()['security'] is True
+        assert started[0]['args'] == ('apply-security',)
+        assert upd._apply['security'] is True
+        if upd.FAMILY != 'rhel':      # apt: 2 log lines per planned package
+            assert upd._apply['total'] == 6
+    finally:
+        upd._apply.clear()
+        upd._apply.update(saved)
+
+
+def test_summary_carries_the_reboot_flag(client, monkeypatch):
+    """A fleet console reads reboot_required off /api/summary — the whole
+    point of carrying it there is that it survives the pending count going
+    back to zero after an apply."""
+    monkeypatch.setattr(upd, '_reboot_flag', lambda: True)
+    monkeypatch.setitem(upd._state, 'available', 0)
+    monkeypatch.setattr(app, 'run', lambda *a, **k: ('', '', 1))
+    monkeypatch.setattr(app, '_unit_present', lambda unit: False)
+    j = client.get('/api/summary').get_json()
+    assert j['updates']['reboot_required'] is True
+
+
+def test_reboot_flag_is_a_stat_on_debian_and_cached_on_rhel(monkeypatch):
+    monkeypatch.setattr(upd, 'FAMILY', 'debian')
+    monkeypatch.setattr(upd.os.path, 'exists',
+                        lambda p: p == '/run/reboot-required')
+    assert upd._reboot_flag() is True
+    monkeypatch.setattr(upd, 'FAMILY', 'rhel')
+    monkeypatch.setattr(upd, '_reboot_required',
+                        lambda: pytest.fail('needs-restarting must not run '
+                                            'on the summary path'))
+    monkeypatch.setitem(upd._state, 'reboot_required', False)
+    assert upd._reboot_flag() is False

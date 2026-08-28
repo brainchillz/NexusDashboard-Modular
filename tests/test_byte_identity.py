@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 import app
+from nexusdash.modules import updates as _updates
 
 GOLDEN_DIR = Path(__file__).parent / 'goldens'
 _UPDATE = os.environ.get('GOLDEN_UPDATE') == '1'
@@ -87,6 +88,10 @@ def client(monkeypatch, tmp_path):
                         lambda: {'golden': 'nut'})
     monkeypatch.setitem(app._DESCRIPTORS['upsmon'], 'summary',
                         lambda: {'golden': 'upsmon'})
+    # The updates summary block reports a live stat of /run/reboot-required —
+    # pin it so the golden never depends on whether the box running the suite
+    # happens to be pending a reboot.
+    monkeypatch.setattr(_updates, '_reboot_flag', lambda: False)
     app.app.config['TESTING'] = True
     return app.app.test_client()
 

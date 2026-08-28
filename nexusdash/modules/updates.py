@@ -20,8 +20,10 @@ cache.
 
 APPLYING goes through the root-owned ``<HELPER_PREFIX>-updates`` helper
 (installers carry it; fixed argv — the dashboard passes no user input across
-that boundary). The helper streams the package manager's own output, which
-the apply thread parses into a progress counter the page polls; afterwards
+that boundary): ``apply`` upgrades everything, ``apply-security`` narrows to
+the security updates, a set the helper derives itself as root rather than
+accept from the caller. The helper streams the package manager's own output,
+which the apply thread parses into a progress counter the page polls; then
 _reboot_required() gives the authoritative reboot answer (the per-package
 `reboot_likely` flag is only ever a heuristic — apt/dnf don't know reboot
 needs in advance). Degrades to a read-only viewer when the helper is absent
@@ -33,7 +35,7 @@ import time
 import subprocess
 import threading
 
-from flask import Blueprint, jsonify, current_app
+from flask import Blueprint, jsonify, current_app, request
 
 from ..core.config import FAMILY, HELPER_PREFIX
 from ..core.runcmd import run, err
@@ -50,12 +52,15 @@ UPDATES_HELPER = HELPER_PREFIX + '-updates'
 
 _lock = threading.Lock()
 _state = {'checked': None, 'available': 0, 'security': 0,
-          'packages': [], 'error': None, 'checking': False}
+          'packages': [], 'error': None, 'checking': False,
+          # Cached for the summary hook — see _reboot_flag().
+          'reboot_required': None}
 
 # One apply at a time, machine-wide; the page polls this while it runs.
 _apply_lock = threading.Lock()
 _apply = {'running': False, 'rc': None, 'started': None, 'finished': None,
-          'log': [], 'done': 0, 'total': 0, 'reboot_required': None}
+          'log': [], 'done': 0, 'total': 0, 'reboot_required': None,
+          'security': False}
 _APPLY_LOG_MAX = 400
 
 # Pre-classification of updates that usually demand a reboot (kernel, libc,
@@ -143,7 +148,13 @@ def _check_rhel():
 
 def _refresh():
     rows, error = (_check_rhel if FAMILY == 'rhel' else _check_debian)()
+    # rhel's reboot answer costs a subprocess (debian's is a stat), so it is
+    # paid for here — once per hourly check — and served from the cache to the
+    # 30s summary poll. See _reboot_flag().
+    reboot = _reboot_required() if FAMILY == 'rhel' else None
     with _lock:
+        if FAMILY == 'rhel':
+            _state['reboot_required'] = reboot
         if error is not None:
             _state.update({'error': error, 'checking': False,
                            'checked': int(time.time())})
@@ -205,10 +216,20 @@ def _reboot_required():
     return os.path.exists('/run/reboot-required')
 
 
-def _apply_thread():
+def _reboot_flag():
+    """Reboot answer cheap enough for the 30s summary hook: on debian a stat
+    of the marker file (always live); on rhel the value the last check/apply
+    cached, because needs-restarting is a subprocess."""
+    if FAMILY == 'rhel':
+        with _lock:
+            return _state['reboot_required']
+    return os.path.exists('/run/reboot-required')
+
+
+def _apply_thread(mode='apply'):
     proc = None
     try:
-        proc = subprocess.Popen(['sudo', '-n', UPDATES_HELPER, 'apply'],
+        proc = subprocess.Popen(['sudo', '-n', UPDATES_HELPER, mode],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
@@ -254,7 +275,9 @@ def updates_summary():
     _kick_refresh()
     s = _snapshot()
     return {'available': s['available'], 'security': s['security'],
-            'checked': s['checked'], 'error': s['error']}
+            'checked': s['checked'], 'error': s['error'],
+            # Fleet consoles flag hosts still needing a reboot after an apply.
+            'reboot_required': _reboot_flag()}
 
 
 @bp.route('/api/updates')
@@ -264,6 +287,7 @@ def api_updates():
     s['family'] = FAMILY
     s['manager'] = 'dnf' if FAMILY == 'rhel' else 'apt'
     s['apply_available'] = os.path.exists(UPDATES_HELPER)
+    s['reboot_required'] = _reboot_flag()
     apply_state = _apply_snapshot()
     # The full log only while running / after a run — trimmed to the tail the
     # page shows. reboot_required stays authoritative-after-apply; on debian
@@ -276,17 +300,23 @@ def api_updates():
 
 @bp.route('/api/updates/apply', methods=['POST'])
 def api_updates_apply():
-    """Run the full upgrade via the root helper (admin — central RBAC blocks
-    read-only POSTs). Async: the page polls GET /api/updates and renders the
-    log/progress from its `apply` block."""
+    """Run the upgrade via the root helper (admin — central RBAC blocks
+    read-only POSTs). Body {"security": true} narrows it to the security
+    updates (helper mode `apply-security`, which derives that package set
+    itself — see the helper: no list crosses the trust boundary). Async: the
+    page polls GET /api/updates and renders the log/progress from its `apply`
+    block."""
+    security = bool((request.get_json(silent=True) or {}).get('security'))
     if not os.path.exists(UPDATES_HELPER):
         return err('updates helper not installed on this node — re-run the '
                    'installer with --helpers-only (or fleet-deploy --helpers)')
     snap = _snapshot()
     if snap['checking']:
         return err('a check is still running — retry when it finishes')
-    if not snap['available']:
-        return err('nothing to apply — no pending updates')
+    pending = snap['security'] if security else snap['available']
+    if not pending:
+        return err('nothing to apply — no %spending updates'
+                   % ('security ' if security else ''))
     with _apply_lock:
         if _apply['running']:
             return err('an apply is already running', 409)
@@ -294,10 +324,11 @@ def api_updates_apply():
                        'started': int(time.time()), 'log': [], 'done': 0,
                        # apt: one Unpacking + one Setting-up line per package;
                        # dnf overwrites total from its own N/M counter lines
-                       'total': 0 if FAMILY == 'rhel' else snap['available'] * 2,
-                       'reboot_required': None})
-    threading.Thread(target=_apply_thread, daemon=True).start()
-    return jsonify({'success': True, 'started': True})
+                       'total': 0 if FAMILY == 'rhel' else pending * 2,
+                       'reboot_required': None, 'security': security})
+    threading.Thread(target=_apply_thread, daemon=True,
+                     args=('apply-security' if security else 'apply',)).start()
+    return jsonify({'success': True, 'started': True, 'security': security})
 
 
 @bp.route('/api/updates/check', methods=['POST'])

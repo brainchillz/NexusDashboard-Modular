@@ -802,41 +802,77 @@ chown root:root "$CADDY_HELPER"
 chmod 755 "$CADDY_HELPER"
 
 info "Installing updates (package upgrade) helper..."
-# Root-owned: runs the full non-interactive package upgrade for the updates
-# module (apt-get dist-upgrade / dnf upgrade — family auto-detected),
-# streaming the package manager's own output for the module's progress view.
-# Fixed argv only — no user-influenced arguments cross this trust boundary.
+# Root-owned: runs the non-interactive package upgrade for the updates module
+# (apt-get dist-upgrade / dnf upgrade — family auto-detected), either whole or
+# narrowed to security updates, streaming the package manager's own output for
+# the module's progress view.
+# Fixed argv only — no user-influenced arguments cross this trust boundary
+# (the security package set is derived inside the helper, not passed in).
 # NOT writable by dashboard.
 UPDATES_HELPER="/usr/local/sbin/${HELPER_PREFIX}-updates"
 cat > "$UPDATES_HELPER" << 'HELPER'
 #!/usr/bin/env python3
 # Root-owned helper for the Nexus Dashboard updates module.
-#   apply : run the full package upgrade non-interactively (apt-get
-#           dist-upgrade with kept-back conffiles / dnf -y upgrade),
-#           streaming the package manager's own output (the dashboard
-#           parses it for progress). Exits with the package manager's rc.
+#   apply          : run the full package upgrade non-interactively (apt-get
+#                    dist-upgrade with kept-back conffiles / dnf -y upgrade),
+#                    streaming the package manager's own output (the dashboard
+#                    parses it for progress). Exits with the manager's rc.
+#   apply-security : the same, narrowed to security updates — dnf --security;
+#                    on apt, the installed packages whose candidate comes from
+#                    a -security archive. That set is derived HERE, as root,
+#                    from apt's own simulation: no package list crosses the
+#                    trust boundary (hence the Inst-line parse duplicated from
+#                    the module — this helper does not trust its caller).
 # Fixed argv only — the dashboard never passes user input across this
 # boundary.
 import os
+import re
 import subprocess
 import sys
+
+_RE_INST = re.compile(r'^Inst (\S+)(?: \[[^\]]+\])? \(\S+ ([^)]*)\)')
+
+
+def security_packages():
+    """Upgradable packages whose candidate comes from a security archive
+    (noble-security, bookworm-security, …), read out of apt-get's own
+    dist-upgrade simulation — read-only, and it takes no lock."""
+    p = subprocess.run(['apt-get', '-s', '-o', 'Debug::NoLocking=1',
+                        'dist-upgrade'], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL, text=True)
+    names = []
+    for line in (p.stdout or '').splitlines():
+        m = _RE_INST.match(line.strip())
+        if m and 'security' in m.group(2).lower():
+            names.append(m.group(1))
+    return names
 
 
 def main():
     if os.geteuid() != 0:
         print('must run as root', file=sys.stderr)
         return 2
-    if sys.argv[1:] != ['apply']:
-        print('usage: %s apply' % sys.argv[0], file=sys.stderr)
+    if sys.argv[1:] not in (['apply'], ['apply-security']):
+        print('usage: %s apply|apply-security' % sys.argv[0], file=sys.stderr)
         return 2
+    security = sys.argv[1] == 'apply-security'
     if os.path.exists('/etc/redhat-release'):
-        cmd = ['dnf', '-y', 'upgrade']
+        cmd = ['dnf', '-y', 'upgrade'] + (['--security'] if security else [])
     else:
         os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
         cmd = ['apt-get', '-y',
                '-o', 'Dpkg::Options::=--force-confdef',
-               '-o', 'Dpkg::Options::=--force-confold',
-               'dist-upgrade']
+               '-o', 'Dpkg::Options::=--force-confold']
+        if security:
+            pkgs = security_packages()
+            if not pkgs:
+                print('no security updates pending')
+                return 0
+            # --only-upgrade: upgrade these (pulling their dependencies), never
+            # install something that is not on the box already.
+            cmd += ['--only-upgrade', 'install'] + pkgs
+        else:
+            cmd += ['dist-upgrade']
     # stdbuf keeps the child line-buffered through the pipe so progress
     # reaches the dashboard as it happens, not in 4k bursts.
     if os.path.exists('/usr/bin/stdbuf'):
