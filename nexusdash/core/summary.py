@@ -168,6 +168,16 @@ def _md_alerts():
             for a in _parse_mdstat(text) if a['degraded']]
 
 
+def _zpool_health_message(pool, health):
+    """A SUSPENDED pool is not merely unhealthy — with failmode=wait every I/O
+    to it blocks, so from outside it looks hung rather than broken. Say what it
+    means and the only way out, since the key is the same one DEGRADED uses."""
+    if health == 'SUSPENDED':
+        return (f"ZFS pool {pool} is SUSPENDED — all I/O is blocked; reconnect the "
+                f"missing device, then clear the pool")
+    return f"ZFS pool {pool} is {health}"
+
+
 def _compute_alerts():
     """The single source of truth for health alerts — used by both the dashboard
     summary and the background notifier. Returns [{key, message}] where `key` is
@@ -194,7 +204,7 @@ def _compute_alerts():
             if len(p) >= 5 and p[0]:
                 if p[4] != 'ONLINE':
                     alerts.append({'key': 'zfs_health:' + p[0],
-                                   'message': f"ZFS pool {p[0]} is {p[4]}"})
+                                   'message': _zpool_health_message(p[0], p[4])})
                 size, alloc = int(p[1]), int(p[2])
                 pctp = round(alloc / size * 100) if size else 0
                 if pctp >= ALERT_FULL_PCT:

@@ -1,0 +1,32 @@
+  pool: tank
+ state: DEGRADED
+status: One or more devices have been removed.
+	Sufficient replicas exist for the pool to continue functioning in a
+	degraded state.
+action: Online the device using zpool online' or replace the device with
+	'zpool replace'.
+  scan: resilvered 72K in 00:00:00 with 0 errors on Fri Aug 28 09:47:46 2026
+config:
+
+	NAME                                      STATE     READ WRITE CKSUM
+	tank                                      DEGRADED     0     0     0
+	  raidz1-0                                DEGRADED     0     0     0
+	    ata-Hitachi_HUS724040ALE641_PAHYTE2T  ONLINE       0     0     0
+	    ata-HGST_HDN726040ALE614_K7H5NGXR     ONLINE       0     0     0
+	    ata-Hitachi_HUS724040ALE641_PBJA4MST  ONLINE       0     0     0
+	    ata-Hitachi_HUS724040ALE641_PCJ97STB  ONLINE       0     0     0
+	    ata-HGST_HDN726040ALE614_K7H574AL     REMOVED      0     0     0
+
+errors: No known data errors
+  pool: rpool
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:03 with 0 errors on Sun Aug 23 00:24:04 2026
+config:
+
+	NAME        STATE     READ WRITE CKSUM
+	rpool       ONLINE       0     0     0
+	  mirror-0  ONLINE       0     0     0
+	    sda3    ONLINE       0     0     0  (resilvering)
+	    sdb3    ONLINE       0     0     0
+
+errors: No known data errors

@@ -1,0 +1,19 @@
+errors: List of errors unavailable: pool I/O is currently suspended
+  pool: tank
+ state: SUSPENDED
+status: One or more devices are faulted in response to IO failures.
+action: Make sure the affected devices are connected, then run 'zpool clear'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-HC
+  scan: resilvered 60K in 00:00:00 with 0 errors on Tue Aug 18 18:44:28 2026
+config:
+
+	NAME                                      STATE     READ WRITE CKSUM
+	tank                                      DEGRADED     0     0     0
+	  raidz1-0                                DEGRADED     0     4     0
+	    ata-Hitachi_HUS724040ALE641_PAHYTE2T  ONLINE       3     7     0
+	    ata-HGST_HDN726040ALE614_K7H5NGXR     ONLINE       0     0     0
+	    ata-Hitachi_HUS724040ALE641_PBJA4MST  ONLINE       0     0     0
+	    ata-Hitachi_HUS724040ALE641_PCJ97STB  ONLINE       0     0     0
+	    ata-HGST_HDN726040ALE614_K7H574AL     REMOVED      0     0     0
+
+errors: 1 data errors, use '-v' for a list

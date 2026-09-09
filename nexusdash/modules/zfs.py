@@ -30,23 +30,62 @@ from .disks import _walk, BY_ID_DIR, _disk_by_id_map, _pool_uses_kernel_names, _
 
 bp = Blueprint('zfs', __name__)
 
+_ZPOOL_STATES = ('ONLINE', 'DEGRADED', 'FAULTED', 'OFFLINE', 'UNAVAIL', 'REMOVED')
+
+def _parse_zpool_config_line(line):
+    """One `config:` row → {name, state, read, write, cksum, note}. The counters
+    are absent on container rows of some layouts (spares/cache headers) and on
+    older zfs builds, so they default to 0; anything after them (e.g.
+    "(resilvering)", "was /dev/sdx1", "corrupted data") is kept as `note`."""
+    parts = line.split()
+    dev = {'name': parts[0], 'state': parts[1] if len(parts) > 1 else '',
+           'read': 0, 'write': 0, 'cksum': 0, 'note': ''}
+    rest = parts[2:]
+    if len(rest) >= 3 and all(x.isdigit() for x in rest[:3]):
+        dev['read'], dev['write'], dev['cksum'] = (int(x) for x in rest[:3])
+        rest = rest[3:]
+    dev['note'] = ' '.join(rest)
+    return dev
+
 def parse_zpool_status(output):
+    """`zpool status` → {pool: {state, scan, config, errors, status, action, devices}}.
+    `config` keeps the raw member lines (legacy consumers); `devices` is the same
+    rows with STATE and the READ/WRITE/CKSUM counters split out, and
+    `status`/`action` carry zpool's own diagnosis + prescribed fix (multi-line,
+    joined) — e.g. a SUSPENDED pool says "faulted in response to IO failures /
+    run 'zpool clear'", which is the one message an operator needs to see."""
     pools = {}
     current_pool = None
+    section = None      # 'status' / 'action' while their wrapped lines continue
+    in_config = False
     for line in output.split('\n'):
         if line.startswith('  pool:'):
             current_pool = line.split('pool:')[1].strip()
-            pools[current_pool] = {'config': [], 'errors': ''}
-        elif line.startswith(' state:') and current_pool:
+            pools[current_pool] = {'config': [], 'errors': '', 'status': '', 'action': '',
+                                   'devices': []}
+            section, in_config = None, False
+            continue
+        if not current_pool:
+            continue
+        if line.startswith('\t') and section and not in_config:
+            pools[current_pool][section] += ' ' + line.strip()
+            continue
+        section = None
+        if line.startswith(' state:'):
             pools[current_pool]['state'] = line.split('state:')[1].strip()
-        elif line.startswith('  scan:') and current_pool:
+        elif line.startswith(('status:', 'action:')):
+            section = line[:6]
+            pools[current_pool][section] = line[7:].strip()
+        elif line.startswith('  scan:'):
             pools[current_pool]['scan'] = line.split('scan:')[1].strip()
-        elif line.startswith('config:') and current_pool:
-            pass
-        elif current_pool and ('ONLINE' in line or 'DEGRADED' in line or 'FAULTED' in line or 'OFFLINE' in line or 'UNAVAIL' in line or 'REMOVED' in line):
-            pools[current_pool]['config'].append(line.strip())
-        elif line.startswith('errors:') and current_pool:
+        elif line.startswith('config:'):
+            in_config = True
+        elif line.startswith('errors:'):
             pools[current_pool]['errors'] = line.split('errors:')[1].strip()
+            in_config = False
+        elif in_config and any(w in line for w in _ZPOOL_STATES):
+            pools[current_pool]['config'].append(line.strip())
+            pools[current_pool]['devices'].append(_parse_zpool_config_line(line))
     return pools
 
 @bp.route('/api/zfs/pools')
@@ -132,6 +171,21 @@ def zfs_pool_scrub(name):
     if action == 'stop':
         return jsonify(run_safe(['zpool', 'scrub', '-s', name]))
     return err('Invalid scrub action')
+
+@bp.route('/api/zfs/pools/<name>/clear', methods=['POST'])
+def zfs_pool_clear(name):
+    """`zpool clear`: resume a SUSPENDED pool once its missing device is back
+    (with failmode=wait every I/O blocks until this runs — there is no other way
+    out short of a reboot), or reset one member's READ/WRITE/CKSUM counters
+    after the operator has judged the errors transient. Optional `device`
+    scopes it to a member; nothing else is touched."""
+    if not RE_POOL.match(name):
+        return err('Invalid pool name')
+    device = ((request.get_json(silent=True) or {}).get('device') or '').strip()
+    if device and not RE_DEVICE.match(device):
+        return err('Invalid device')
+    argv = ['zpool', 'clear', name] + ([device] if device else [])
+    return jsonify(run_safe(argv))
 
 @bp.route('/api/zfs/pools/<name>/trim', methods=['POST'])
 def zfs_pool_trim(name):

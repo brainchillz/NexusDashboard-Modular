@@ -271,11 +271,12 @@ async function zfsRefresh() {
 
   for (const p of pools) {
     const pd = pD[p.name] || {};
-    const configRows = (pd.config || []).map(l => `<div class="zfs-vdev">${escapeHtml(l)}</div>`).join('');
+    const configRows = zfsMemberRows(pd);
     const cap = parseInt(p.cap) || 0;
     const state = pd.state || p.health;
     const scanning = /(scrub|resilver) in progress/i.test(pd.scan || '');
     const errors = (pd.errors && pd.errors !== 'No known data errors') ? pd.errors : '';
+    const trouble = zfsPoolTrouble(pd, state);
     html += `<div class="pool-card">
       <div class="pool-header">
         <strong class="pool-name">${escapeHtml(p.name)}</strong>
@@ -288,11 +289,13 @@ async function zfsRefresh() {
           ? `<button class="btn btn-sm btn-warning" onclick="zfsScrub('${jsArg(p.name)}','stop')">Stop Scrub</button>`
           : `<button class="btn btn-sm btn-outline" onclick="zfsScrub('${jsArg(p.name)}','start')">Scrub</button>`}
         <button class="btn btn-sm btn-outline" onclick="zfsTrim('${jsArg(p.name)}')">Trim</button>
+        ${trouble ? `<button class="btn btn-sm btn-warning" onclick="zfsClear('${jsArg(p.name)}','')" title="zpool clear — resume a suspended pool / reset error counters">Clear</button>` : ''}
         ${pd.unstable ? `<button class="btn btn-sm btn-warning" onclick="zfsStabilizePool('${jsArg(p.name)}')">Stabilize</button>` : ''}
         <button class="btn btn-sm btn-outline" onclick="zfsExportPool('${jsArg(p.name)}')">Export</button>
         <button class="btn btn-sm btn-danger" onclick="zfsDestroyPool('${jsArg(p.name)}')">Destroy</button>
       </div>
       ${usageBar(cap)}
+      ${zfsStatusBanner(pd, state)}
       ${pd.scan ? `<div class="pool-scan"><strong>Scan:</strong> ${escapeHtml(pd.scan)}</div>` : ''}
       ${errors ? `<div class="pool-errors"><strong>Errors:</strong> ${escapeHtml(errors)}</div>` : ''}
       ${configRows}
@@ -303,6 +306,61 @@ async function zfsRefresh() {
 }
 
 async function page_zfs() { await zfsRefresh(); }
+
+// A member that ZFS still calls ONLINE but that has been throwing errors — the
+// one clue a suspended pool leaves (its state changes can't be committed), and
+// what a flaky cable looks like before it becomes a FAULTED disk.
+function zfsDevHasErrors(d) { return (d.read || 0) + (d.write || 0) + (d.cksum || 0) > 0; }
+
+// Whether the pool has something `zpool clear` can act on: any non-ONLINE
+// state, or error counters on a member. Drives the Clear button.
+function zfsPoolTrouble(pd, state) {
+  return (state && state !== 'ONLINE') || (pd.devices || []).some(zfsDevHasErrors);
+}
+
+// zpool's own diagnosis + prescribed fix (the status:/action: lines), shown
+// whenever the pool is not simply ONLINE. SUSPENDED gets a loud banner: every
+// I/O is blocked until the missing device is back and the pool is cleared.
+function zfsStatusBanner(pd, state) {
+  if (!pd.status && !pd.action && state === 'ONLINE') return '';
+  const suspended = state === 'SUSPENDED';
+  const parts = [];
+  if (suspended) parts.push('<strong>Pool I/O is suspended.</strong> Every read and write is blocked until the missing device is reconnected and the pool is cleared — Replace/Add/Detach will be refused until then.');
+  if (pd.status) parts.push(escapeHtml(pd.status));
+  if (pd.action) parts.push(`<em>${escapeHtml(pd.action)}</em>`);
+  if (!parts.length) return '';
+  return `<div class="pool-status ${suspended ? 'pool-status-bad' : ''}">${parts.join(' ')}</div>`;
+}
+
+// Member rows for the pool card: name, state, and the READ/WRITE/CKSUM
+// counters, with a row highlighted when its counters are non-zero. Falls back
+// to the raw config lines when the parsed form isn't there.
+function zfsMemberRows(pd) {
+  if (!(pd.devices || []).length) return (pd.config || []).map(l => `<div class="zfs-vdev">${escapeHtml(l)}</div>`).join('');
+  return pd.devices.map(d => {
+    const bad = zfsDevHasErrors(d);
+    const counters = bad ? ` <span class="zfs-vdev-counters">R ${d.read} · W ${d.write} · C ${d.cksum}</span>` : '';
+    return `<div class="zfs-vdev ${bad ? 'zfs-vdev-err' : ''}">${escapeHtml(d.name)} <span class="status-badge ${zfsStateColor(d.state, bad)}">${escapeHtml(d.state)}</span>${counters}${d.note ? ' ' + escapeHtml(d.note) : ''}</div>`;
+  }).join('');
+}
+
+function zfsStateColor(state, hasErrors) {
+  if (state !== 'ONLINE') return 'red';
+  return hasErrors ? 'yellow' : 'green';
+}
+
+// zpool clear — pool-wide (resume a SUSPENDED pool, reset every counter) or
+// one member (reset its counters after judging the errors transient).
+async function zfsClear(pool, device) {
+  const what = device ? `error counters on "${device}" in pool "${pool}"` : `pool "${pool}"`;
+  if (!confirm(`Clear ${what}?\n\nThis runs zpool clear. On a suspended pool it resumes I/O — make sure the missing device is physically connected first, or it will fail again. It resets the READ/WRITE/CKSUM counters; if a disk keeps accumulating errors after a clear, replace it.`)) return;
+  try {
+    const r = await API.post(`/api/zfs/pools/${encodeURIComponent(pool)}/clear`, device ? { device } : {});
+    if (!r.success) alert(r.stderr || 'Clear failed');
+    // Refresh whichever view issued it — the Manage modal if it is open, else the page.
+    if ($('modal-overlay').style.display === 'flex') zfsPoolDetail(pool); else zfsRefresh();
+  } catch(e) { alert(e.message); }
+}
 
 // ARC is a RAM cache present on any ZFS host, with or without a cache device.
 function zfsArcCard(arc) {
@@ -487,21 +545,29 @@ async function zfsPoolDetail(pool) {
     API.get('/api/zfs/pools/detail')
   ]);
   const pd = (detail || {})[pool] || {};
-  const devRows = (pd.config || []).map(line => {
-    const parts = line.split(/\s+/);
-    const dev = parts[0] || '';
-    const state = parts[1] || '';
+  const suspended = pd.state === 'SUSPENDED';
+  // While the pool is suspended every zpool mutation is refused ("pool I/O is
+  // currently suspended") — say so up front instead of relaying that after
+  // the click. Clear is the one action that applies.
+  const gate = suspended ? ' disabled title="Pool I/O is suspended — reconnect the missing device and Clear first"' : '';
+  const members = (pd.devices || []).length ? pd.devices
+    : (pd.config || []).map(line => { const p = line.split(/\s+/); return { name: p[0] || '', state: p[1] || '', read: 0, write: 0, cksum: 0, note: '' }; });
+  const devRows = members.map(d => {
+    const dev = d.name, state = d.state;
     // The pool row and vdev containers (mirror-0, raidz1-0, spares, cache, logs)
     // aren't replaceable leaf devices.
     const container = dev === pool || /^(mirror|raidz|spare|cache|log|replacing)/i.test(dev);
+    const bad = zfsDevHasErrors(d);
     const acts = container ? '' : `
-        <button class="btn btn-sm" onclick="zfsDevice('${jsArg(pool)}','offline','${jsArg(dev)}')">Offline</button>
-        <button class="btn btn-sm" onclick="zfsDevice('${jsArg(pool)}','online','${jsArg(dev)}')">Online</button>
-        <button class="btn btn-sm" onclick="zfsReplace('${jsArg(pool)}','${jsArg(dev)}')">Replace</button>
-        <button class="btn btn-sm btn-danger" onclick="zfsDevice('${jsArg(pool)}','detach','${jsArg(dev)}')">Detach</button>
-        <button class="btn btn-sm btn-danger" onclick="zfsRemove('${jsArg(pool)}','${jsArg(dev)}')">Remove</button>`;
-    const badge = state ? `<span class="status-badge ${state === 'ONLINE' ? 'green' : 'red'}">${escapeHtml(state)}</span>` : '';
-    return `<tr><td${container ? '' : ' style="padding-left:20px"'}><code>${escapeHtml(dev)}</code></td><td>${badge}</td><td>${acts}</td></tr>`;
+        <button class="btn btn-sm" onclick="zfsDevice('${jsArg(pool)}','offline','${jsArg(dev)}')"${gate}>Offline</button>
+        <button class="btn btn-sm" onclick="zfsDevice('${jsArg(pool)}','online','${jsArg(dev)}')"${gate}>Online</button>
+        <button class="btn btn-sm" onclick="zfsReplace('${jsArg(pool)}','${jsArg(dev)}')"${gate}>Replace</button>
+        ${bad ? `<button class="btn btn-sm btn-warning" onclick="zfsClear('${jsArg(pool)}','${jsArg(dev)}')" title="Reset this device's error counters">Clear</button>` : ''}
+        <button class="btn btn-sm btn-danger" onclick="zfsDevice('${jsArg(pool)}','detach','${jsArg(dev)}')"${gate}>Detach</button>
+        <button class="btn btn-sm btn-danger" onclick="zfsRemove('${jsArg(pool)}','${jsArg(dev)}')"${gate}>Remove</button>`;
+    const badge = state ? `<span class="status-badge ${zfsStateColor(state, bad)}">${escapeHtml(state)}${bad && state === 'ONLINE' ? ' · errors' : ''}</span>` : '';
+    const cnt = v => `<td class="${bad ? 'zfs-vdev-err' : ''}">${v || 0}</td>`;
+    return `<tr><td${container ? '' : ' style="padding-left:20px"'}><code>${escapeHtml(dev)}</code>${d.note ? ` <span class="help">${escapeHtml(d.note)}</span>` : ''}</td><td>${badge}</td>${cnt(d.read)}${cnt(d.write)}${cnt(d.cksum)}<td>${acts}</td></tr>`;
   }).join('');
 
   let dsRows = datasets.map(ds => {
@@ -548,13 +614,15 @@ async function zfsPoolDetail(pool) {
   `).join('');
 
   openModal(`Pool: ${pool}`, `
-    <h4>Devices</h4>
+    <h4>Devices <span class="status-badge ${pd.state === 'ONLINE' ? 'green' : 'red'}">${escapeHtml(pd.state || '')}</span></h4>
+    ${zfsStatusBanner(pd, pd.state)}
     <div class="toolbar" style="margin-bottom:8px">
-      <button class="btn btn-sm" onclick="zfsAddVdev('${jsArg(pool)}')">+ Add Device</button>
+      <button class="btn btn-sm" onclick="zfsAddVdev('${jsArg(pool)}')"${gate}>+ Add Device</button>
+      ${zfsPoolTrouble(pd, pd.state) ? `<button class="btn btn-sm btn-warning" onclick="zfsClear('${jsArg(pool)}','')" title="zpool clear — resume a suspended pool / reset error counters">Clear pool</button>` : ''}
     </div>
     <table class="table">
-      <thead><tr><th>Device</th><th>State</th><th>Actions</th></tr></thead>
-      <tbody>${devRows || '<tr><td colspan="3">No device info</td></tr>'}</tbody>
+      <thead><tr><th>Device</th><th>State</th><th>Read</th><th>Write</th><th>Cksum</th><th>Actions</th></tr></thead>
+      <tbody>${devRows || '<tr><td colspan="6">No device info</td></tr>'}</tbody>
     </table>
     <h4 style="margin-top:20px">Datasets</h4>
     <div class="toolbar" style="margin-bottom:8px">

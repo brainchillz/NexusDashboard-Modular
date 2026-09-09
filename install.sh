@@ -43,10 +43,19 @@ HELPER_PREFIX="${DASHBOARD_HELPER_PREFIX:-nexus-dashboard}"
 # nodes). Every usermod/chown below must tolerate that
 # instead of aborting the whole run under `set -e` — which is exactly what a
 # helpers refresh did there, leaving the later helpers uninstalled.
-if id "$DASHBOARD_USER" >/dev/null 2>&1; then HAVE_DASH_USER=1; else HAVE_DASH_USER=0; fi
+# Checked as a FUNCTION, never cached in a variable. On a fresh install the
+# service user does not exist yet at this point -- it is created further down
+# (useradd, "Creating service user"). A flag captured here would be 0 for the
+# whole run, so every dash_chown would silently no-op and the app tree would
+# stay root-owned, leaving the dashboard unable to write auth.json and the
+# service crash-looping on PermissionError with no traceback in the journal.
+# The same staleness would skip the render and models group joins below.
+# Only in-place upgrades have the user up front, which is why this stayed
+# hidden until the first genuinely clean install (2026-09-09).
+have_dash_user() { id "$DASHBOARD_USER" >/dev/null 2>&1; }
 
 dash_chown() {   # usage: dash_chown [-R] <path...>  — no-op without a service user
-    [ "$HAVE_DASH_USER" = 1 ] || return 0
+    have_dash_user || return 0
     local flags=()
     while [ "${1:-}" = "-R" ]; do flags+=(-R); shift; done
     chown "${flags[@]}" "$DASHBOARD_USER:$DASHBOARD_USER" "$@"
@@ -1189,7 +1198,7 @@ chmod 755 "$GPU_TUNE_HELPER"
 # render-group owned. rocm-smi reads sysfs and never needed this, which is why
 # the GPU page worked without it; the tunables page does not.
 if getent group render >/dev/null 2>&1; then
-    if [ "$HAVE_DASH_USER" = 1 ] && ! id -nG "$DASHBOARD_USER" | tr ' ' '\n' | grep -qx render; then
+    if have_dash_user && ! id -nG "$DASHBOARD_USER" | tr ' ' '\n' | grep -qx render; then
         usermod -aG render "$DASHBOARD_USER"
         warn "  $DASHBOARD_USER joined render (GPU tunables) — RESTART the dashboard"
         warn "  for it to take effect (group membership is read at process start)."
@@ -1454,7 +1463,7 @@ if ! getent group "$MODELS_GROUP" >/dev/null 2>&1; then
     groupadd --system "$MODELS_GROUP"
     info "  created the $MODELS_GROUP group"
 fi
-if [ "$HAVE_DASH_USER" = 0 ]; then
+if ! have_dash_user; then
     info "  no $DASHBOARD_USER user here (the service runs as root) — no group join needed"
 elif ! id -nG "$DASHBOARD_USER" | tr ' ' '\n' | grep -qx "$MODELS_GROUP"; then
     usermod -aG "$MODELS_GROUP" "$DASHBOARD_USER"
