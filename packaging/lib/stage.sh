@@ -34,14 +34,21 @@ extract_block '$SUDOERS_FILE' SUDOERS etc/sudoers.d/nexus-dashboard 0440
 
 echo "stage: /usr/local/sbin helpers"
 # install.sh var name -> installed helper basename
+# Keep in lockstep with install.sh's helper heredocs — every
+# `cat > "$X_HELPER" << 'HELPER'` there needs an entry here, and a stale entry is
+# a HARD failure (extract_block exits when it cannot find the heredoc), so a
+# deleted helper breaks every package build. tests/test_packaging_stage.py fails
+# on any drift in either direction.
 declare -A HELPERS=(
     ['$LOCATE_HELPER']=nexus-dashboard-locate-read
     ['$SESSIONS_HELPER']=nexus-dashboard-iscsi-sessions
     ['$SNAPFS_HELPER']=nexus-dashboard-snap-fs
     ['$NETPLAN_HELPER']=nexus-dashboard-netplan
     ['$CADDY_HELPER']=nexus-dashboard-caddy
+    ['$UPDATES_HELPER']=nexus-dashboard-updates
     ['$MOUNT_HELPER']=nexus-dashboard-mount
-    ['$MODEL_FETCH_HELPER']=nexus-dashboard-model-fetch
+    ['$GPU_TUNE_HELPER']=nexus-dashboard-gpu-tune
+    ['$NUT_HELPER']=nexus-dashboard-nut
     ['$DLNA_RESCAN_HELPER']=nexus-dashboard-dlna-rescan
     ['$DLNA_STATS_HELPER']=nexus-dashboard-dlna-stats
 )
