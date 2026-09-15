@@ -33,7 +33,7 @@ REPLICATION_FILE = os.environ.get('DASHBOARD_REPLICATION_FILE', os.path.join(APP
 REPL_KEY = os.environ.get('DASHBOARD_REPL_KEY', os.path.join(APP_DIR, 'replication_key'))
 REPL_KNOWN_HOSTS = os.path.join(APP_DIR, 'replication_known_hosts')
 REPL_TIMER = UNIT_PREFIX + '-replicate.timer'
-RE_HOSTNAME = re.compile(r'^[a-zA-Z0-9_.-]+$')
+RE_HOSTNAME = re.compile(r'^[a-zA-Z0-9_.-]+\Z')
 
 
 def load_replication():
@@ -89,15 +89,30 @@ def _local_snaps(dataset):
     return [l.split('@', 1)[1] for l in out.split('\n') if '@' in l]
 
 
+# What `zfs list` says when the dataset simply is not there — the ONE non-zero
+# exit that legitimately means "do an initial full send".
+_RE_ZFS_NO_DATASET = re.compile(r'dataset does not exist', re.I)
+
+
 def _remote_snaps(job):
-    """Snapshot short-names of the target on the remote, or None if the target
-    dataset does not exist there yet (i.e. an initial replication is needed)."""
+    """(snapshot short-names on the remote, None), (None, None) when the
+    target dataset does not exist there yet — an initial replication is
+    needed — or (None, error) when the listing FAILED for any other reason.
+
+    The distinction matters: a full stream is received with `-F`, which for
+    an existing dataset means OVERWRITE. Treating an SSH hiccup, a sudo
+    refusal or a wrong hostname as "no dataset yet" used to turn a routine
+    incremental into a from-scratch send that replaced the remote's history
+    (and re-shipped every byte). Now anything that is not a clean listing and
+    not a clean "does not exist" aborts the job with the remote's own words."""
     cmd = _ssh_base(job['host'], job['user'], job.get('port', 22)) + \
         ['sudo', '-n', 'zfs', 'list', '-H', '-o', 'name', '-t', 'snapshot', '-d', '1', job['target']]
-    out, _, rc = run(cmd, no_sudo=True)
-    if rc != 0:
-        return None
-    return [l.split('@', 1)[1] for l in out.split('\n') if '@' in l]
+    out, errtxt, rc = run(cmd, no_sudo=True)
+    if rc == 0:
+        return [l.split('@', 1)[1] for l in out.split('\n') if '@' in l], None
+    if _RE_ZFS_NO_DATASET.search(errtxt or ''):
+        return None, None
+    return None, ((errtxt or out).strip()[-300:] or 'remote zfs list failed (rc=%d)' % rc)
 
 
 def _pipe_send_recv(send_cmd, recv_cmd):
@@ -127,7 +142,10 @@ def replicate_job(job):
     if not local:
         return {'ok': False, 'error': 'No snapshots on %s — create or schedule one first' % source}
     latest = local[-1]
-    remote = _remote_snaps(job)
+    remote, rerr = _remote_snaps(job)
+    if rerr:
+        return {'ok': False, 'error': 'Could not list snapshots on %s@%s (not replicating '
+                'rather than guessing): %s' % (job['user'], job['host'], rerr)}
     send = ['sudo', '-n', 'zfs', 'send']
     if remote is None:
         # Initial replication: full stream up to the latest snapshot.

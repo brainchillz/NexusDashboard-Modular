@@ -21,13 +21,11 @@ import os
 JS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       'static', 'js')
 
-# Known-missing and deliberately NOT silenced beyond this line: _setBridgeIfaces
-# is called twice in containers.js (addBridgeIface / removeBridgeIface) and is
-# defined nowhere — it is absent from the pre-split app too, so it has never
-# existed. Adding a bridge interface to an LXD network throws. Listing it here
-# keeps the guard useful for everything else instead of leaving it red; remove
-# the entry when the function is written.
-KNOWN_MISSING = {'_setBridgeIfaces'}
+# Names the guard should tolerate while a known gap is open. Empty since 3.4.3:
+# _setBridgeIfaces (called by addBridgeIface/removeBridgeIface, defined nowhere
+# — it never existed, even pre-split) sat here until it was written on top of
+# the networks PATCH route. Add to this set only with a comment saying why.
+KNOWN_MISSING = set()
 
 
 def _declared_and_used():
@@ -56,10 +54,25 @@ def test_no_undeclared_module_globals():
 
 
 def test_known_missing_list_stays_honest():
-    """If someone implements _setBridgeIfaces, this fails so the exception is
-    removed rather than quietly masking a future regression of the same name."""
+    """An entry whose function now exists must be removed, so the set can never
+    quietly mask a future regression of the same name."""
     declared, _used = _declared_and_used()
     still_missing = {n for n in KNOWN_MISSING if n not in declared}
     assert still_missing == KNOWN_MISSING, (
         'KNOWN_MISSING is stale — these now exist and should be removed from it: '
         '%s' % sorted(KNOWN_MISSING - still_missing))
+
+
+def test_every_api_helper_method_used_is_defined():
+    """`API.patch(...)` was called from containers.js for two PATCH routes while
+    core.js defined only get/post/put/delete — a TypeError at click time that no
+    parse check can see. Every API.<method>( used anywhere must be a method of
+    the API object in core.js."""
+    core = open(os.path.join(JS_DIR, 'core.js')).read()
+    api_body = core.split('const API = {', 1)[1].split('\n};', 1)[0]
+    defined = set(re.findall(r'^\s*(?:async\s+)?([a-zA-Z]\w*)\s*\(', api_body, re.M))
+    text = '\n'.join(open(f).read() for f in sorted(glob.glob(os.path.join(JS_DIR, '*.js'))))
+    used = set(re.findall(r'\bAPI\.([a-zA-Z]\w*)\s*\(', text))
+    assert used - defined == set(), (
+        'API.<method> calls with no such method on the API object in core.js: '
+        '%s' % sorted(used - defined))

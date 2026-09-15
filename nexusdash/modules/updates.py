@@ -118,11 +118,19 @@ def parse_dnf_check_update(text):
 
 
 # ─── The check itself (runs in a background thread) ────────────────────
+def _last_line(text, default):
+    """The last non-blank line of a command's output, for a one-line error.
+    `.splitlines()[-1]` on whitespace-only stderr is an IndexError — which,
+    inside the background check thread, used to be fatal (see _refresh)."""
+    lines = [l for l in (text or '').strip().splitlines() if l.strip()]
+    return lines[-1] if lines else default
+
+
 def _check_debian():
     out, e, rc = run(['apt-get', '-s', '-o', 'Debug::NoLocking=1',
                       'dist-upgrade'], no_sudo=True, timeout=120)
     if rc != 0:
-        return None, (e or out or 'apt-get failed').strip().splitlines()[-1]
+        return None, _last_line(e or out, 'apt-get failed')
     return parse_apt_dist_upgrade(out), None
 
 
@@ -134,7 +142,7 @@ def _check_rhel():
     out, e, rc = run(['dnf', '-q', '-y', 'check-update'],
                      no_sudo=True, timeout=300)
     if rc not in (0, 100):
-        return None, (e or out or 'dnf failed').strip().splitlines()[-1]
+        return None, _last_line(e or out, 'dnf failed')
     rows = parse_dnf_check_update(out) if rc == 100 else []
     if rows:
         sout, _, src = run(['dnf', '-q', '-y', 'check-update', '--security'],
@@ -147,25 +155,36 @@ def _check_rhel():
 
 
 def _refresh():
-    rows, error = (_check_rhel if FAMILY == 'rhel' else _check_debian)()
-    # rhel's reboot answer costs a subprocess (debian's is a stat), so it is
-    # paid for here — once per hourly check — and served from the cache to the
-    # 30s summary poll. See _reboot_flag().
-    reboot = _reboot_required() if FAMILY == 'rhel' else None
-    with _lock:
-        if FAMILY == 'rhel':
-            _state['reboot_required'] = reboot
-        if error is not None:
-            _state.update({'error': error, 'checking': False,
+    """The check itself. Runs in a background thread, so an exception here
+    has nowhere to go — and `checking` is what gates the next check AND every
+    apply. It is therefore cleared in a `finally`: a crash records itself as
+    the check's error instead of wedging the module until a restart."""
+    try:
+        rows, error = (_check_rhel if FAMILY == 'rhel' else _check_debian)()
+        # rhel's reboot answer costs a subprocess (debian's is a stat), so it is
+        # paid for here — once per hourly check — and served from the cache to
+        # the 30s summary poll. See _reboot_flag().
+        reboot = _reboot_required() if FAMILY == 'rhel' else None
+        with _lock:
+            if FAMILY == 'rhel':
+                _state['reboot_required'] = reboot
+            if error is not None:
+                _state.update({'error': error, 'checked': int(time.time())})
+            else:
+                for r in rows:
+                    r['reboot_likely'] = _reboot_likely(r['name'])
+                rows.sort(key=lambda r: (not r['security'], r['name']))
+                _state.update({'checked': int(time.time()), 'error': None,
+                               'available': len(rows),
+                               'security': sum(1 for r in rows if r['security']),
+                               'packages': rows})
+    except Exception as ex:                        # noqa: BLE001 — see docstring
+        with _lock:
+            _state.update({'error': 'check failed: %s: %s' % (type(ex).__name__, ex),
                            'checked': int(time.time())})
-        else:
-            for r in rows:
-                r['reboot_likely'] = _reboot_likely(r['name'])
-            rows.sort(key=lambda r: (not r['security'], r['name']))
-            _state.update({'checked': int(time.time()), 'error': None,
-                           'available': len(rows),
-                           'security': sum(1 for r in rows if r['security']),
-                           'packages': rows, 'checking': False})
+    finally:
+        with _lock:
+            _state['checking'] = False
 
 
 def _kick_refresh(force=False):

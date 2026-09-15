@@ -86,18 +86,18 @@ def write_text_atomic(path, text, mode=0o644):
 
 
 # ─── Validators (inlined; Nexus core/validators is storage-oriented) ──
-RE_HOSTNAME = _re.compile(r'^[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?$')
+RE_HOSTNAME = _re.compile(r'^[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?\Z')
 RE_DOMAIN = _re.compile(r'^(?=.{1,253}$)[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?'
                         r'(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*$')
-RE_MAC = _re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
-RE_LEASE = _re.compile(r'^(\d+[smhdw]?|infinite)$')
-RE_TAG = _re.compile(r'^[A-Za-z0-9_-]{1,32}$')
-RE_IFACE = _re.compile(r'^[A-Za-z0-9._@-]{1,15}$')
-RE_DHCP_OPTION = _re.compile(r'^(\d{1,3}|option6?:[a-z0-9-]{1,40})$')
-RE_OPT_VALUE = _re.compile(r'^[A-Za-z0-9 .,:/_"\'=\[\]-]{1,255}$')
-RE_BOOT_FILE = _re.compile(r'^[A-Za-z0-9._/-]{1,128}$')
-RE_ID = _re.compile(r'^[a-z]_[0-9a-f]{6}$')
-RE_COMMENT = _re.compile(r'^[^\r\n]{0,200}$')
+RE_MAC = _re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\Z')
+RE_LEASE = _re.compile(r'^(\d+[smhdw]?|infinite)\Z')
+RE_TAG = _re.compile(r'^[A-Za-z0-9_-]{1,32}\Z')
+RE_IFACE = _re.compile(r'^[A-Za-z0-9._@-]{1,15}\Z')
+RE_DHCP_OPTION = _re.compile(r'^(\d{1,3}|option6?:[a-z0-9-]{1,40})\Z')
+RE_OPT_VALUE = _re.compile(r'^[A-Za-z0-9 .,:/_"\'=\[\]-]{1,255}\Z')
+RE_BOOT_FILE = _re.compile(r'^[A-Za-z0-9._/-]{1,128}\Z')
+RE_ID = _re.compile(r'^[a-z]_[0-9a-f]{6}\Z')
+RE_COMMENT = _re.compile(r'^[^\r\n]{0,200}\Z')
 
 
 def is_ipv4(s):
@@ -754,7 +754,7 @@ def cli_dhcp_probe(argv=None):
     """`app.py dhcp-probe [iface ...]` — prints JSON, always exits 0. Runs
     privileged (sudo, port-68 bind) via a pinned sudoers line."""
     ifaces = [a for a in (argv[2:] if argv else [])
-              if _re.match(r'^[A-Za-z0-9._@-]{1,15}$', a)]
+              if _re.match(r'^[A-Za-z0-9._@-]{1,15}\Z', a)]
     all_servers, errors = [], []
     for iface in (ifaces or [None]):
         srv, e = probe_interface(iface)
@@ -775,7 +775,8 @@ def probe_for_foreign_dhcp(interfaces):
     cmd = [sys.executable, os.path.join(APP_DIR, 'app.py'), 'dhcp-probe'] + list(interfaces)
     out, e, rc = run(cmd, timeout=15)
     if rc != 0:
-        return {'servers': [], 'error': (e or 'probe failed').strip().splitlines()[-1]}
+        lines = [l for l in (e or '').strip().splitlines() if l.strip()]
+        return {'servers': [], 'error': lines[-1] if lines else 'probe failed'}
     try:
         data = json.loads(out.strip().splitlines()[-1])
     except (ValueError, IndexError):

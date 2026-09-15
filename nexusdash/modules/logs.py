@@ -31,7 +31,7 @@ from ..core.tasks import MANAGED_TASKS
 bp = Blueprint('logs', __name__)
 
 LOG_PRIORITIES = {'0', '1', '2', '3', '4', '5', '6', '7'}
-RE_LOG_GREP = re.compile(r'^[\w .:@/=,+-]{0,120}$')
+RE_LOG_GREP = re.compile(r'^[\w .:@/=,+-]{0,120}\Z')
 
 
 def _own_unit():
@@ -58,6 +58,20 @@ def _log_sources():
 
 def _log_unit_for(source):
     return next((s['unit'] for s in _log_sources() if s['id'] == source), None)
+
+
+@bp.route('/api/logs/<service>')
+def api_logs(service):
+    """Last 100 journal lines for one managed service (the Services page's
+    Logs button). Lives on this never-gated blueprint on purpose: it used to
+    sit on the disks blueprint, where disabling the Disks module 403'd it."""
+    svc = resolve_service(service)
+    if not svc:
+        return err('Invalid service')
+    out, _, rc = run(['journalctl', '-u', svc, '--no-pager', '-n', '100', '--output=short-unix'])
+    if rc != 0 or not out.strip():
+        out = out or 'No logs available'
+    return jsonify({'logs': out})
 
 
 @bp.route('/api/logs/sources')

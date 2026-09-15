@@ -29,6 +29,20 @@ const API = {
     if (!r.ok && !j.success) throw new Error(j.error || JSON.stringify(j));
     return j;
   },
+  // Both LXD config edits (instance limits, managed-network settings) are
+  // PATCH routes. This method was missing until 3.4.3, so their Apply buttons
+  // threw "API.patch is not a function".
+  async patch(path, data) {
+    const r = await fetch(path, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    if (r.status === 401) onUnauthorized();
+    const j = await r.json();
+    if (!r.ok && !j.success) throw new Error(j.error || JSON.stringify(j));
+    return j;
+  },
   async delete(path) {
     const r = await fetch(path, { method: 'DELETE' });
     if (r.status === 401) onUnauthorized();

@@ -39,8 +39,8 @@ from ..core.services import RE_SERVICE
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_STDOUT_BYTES = 256 * 1024
 
-RE_ID = re.compile(r'^[a-z][a-z0-9-]{1,31}$')
-RE_ARGV0 = re.compile(r'^[A-Za-z0-9_./-]+$')
+RE_ID = re.compile(r'^[a-z][a-z0-9-]{1,31}\Z')
+RE_ARGV0 = re.compile(r'^[A-Za-z0-9_./-]+\Z')
 # never a shell/priv-escalation wrapper; `sudo:` is the only sudo path
 ARGV0_DENY = {'sudo', 'su', 'sh', 'bash', 'dash', 'zsh', 'ksh', 'env',
               'nsenter', 'doas'}
@@ -85,7 +85,7 @@ def _check_unit(unit, where):
 
 
 def _check_url(url, where):
-    _want(isinstance(url, str) and re.match(r'^https?://[^\s]+$', url),
+    _want(isinstance(url, str) and re.match(r'^https?://[^\s]+\Z', url),
           where, 'url must be http(s)')
 
 
@@ -216,7 +216,7 @@ def _validate(man, name):
         where = f'pages[{pi}]'
         _want(isinstance(pg, dict), where, 'page must be a mapping')
         _want(isinstance(pg.get('id'), str)
-              and re.match(r'^[a-z][a-z0-9-]{0,31}$', pg['id']),
+              and re.match(r'^[a-z][a-z0-9-]{0,31}\Z', pg['id']),
               where + '.id', 'invalid page id')
         _want(isinstance(pg.get('label'), str) and pg['label'],
               where + '.label', 'page needs a label')

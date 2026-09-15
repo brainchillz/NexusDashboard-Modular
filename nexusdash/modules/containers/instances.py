@@ -218,7 +218,11 @@ def instance_state(name):
     action = data.get('action')
     if action not in STATE_ACTIONS:
         return err('Invalid action')
-    body = {'action': action, 'timeout': int(data.get('timeout', 60)),
+    try:
+        timeout = int(data.get('timeout', 60))
+    except (TypeError, ValueError):
+        return err('timeout must be a number of seconds')
+    body = {'action': action, 'timeout': timeout,
             'force': bool(data.get('force', False)),
             'stateful': bool(data.get('stateful', False))}
     try:

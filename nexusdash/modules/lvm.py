@@ -30,15 +30,15 @@ from .disks import _walk, BOOT_MOUNTS
 
 bp = Blueprint('lvm', __name__)
 
-RE_LVM = re.compile(r'^[a-zA-Z0-9+_.][a-zA-Z0-9+_.-]*$')        # vg / lv names
-RE_LVSIZE = re.compile(r'^\+?[0-9]+(\.[0-9]+)?[KkMmGgTtPp]?$')  # -L sizes (and +N to extend)
-RE_LVPCT = re.compile(r'^[0-9]{1,3}%(FREE|VG)$')               # -l percentages
+RE_LVM = re.compile(r'^[a-zA-Z0-9+_.][a-zA-Z0-9+_.-]*\Z')        # vg / lv names
+RE_LVSIZE = re.compile(r'^\+?[0-9]+(\.[0-9]+)?[KkMmGgTtPp]?\Z')  # -L sizes (and +N to extend)
+RE_LVPCT = re.compile(r'^[0-9]{1,3}%(FREE|VG)\Z')               # -l percentages
 # Extending accepts a leading '+' too: '+100%FREE' ADDS all free space, while
 # a bare '100%FREE' SETS the size to 100% of the free space — which silently
 # resolves to no change whenever free space happens to equal the current size
 # (lvextend then exits 0 saying "successfully resized"). Create has no such
 # ambiguity, so it keeps the plain RE_LVPCT.
-RE_LVPCT_EXT = re.compile(r'^\+?[0-9]{1,3}%(FREE|VG)$')        # -l percentages (+N to add)
+RE_LVPCT_EXT = re.compile(r'^\+?[0-9]{1,3}%(FREE|VG)\Z')        # -l percentages (+N to add)
 # lvextend/lvresize report a zero-change resize on stdout with rc=0.
 RE_LV_NOOP = re.compile(r'matches existing size|unchanged from', re.I)
 

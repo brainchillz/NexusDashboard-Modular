@@ -152,7 +152,7 @@ def _set_restricted_mode(iqn):
 
 @bp.route('/api/iscsi/targets', methods=['POST'])
 def iscsi_target_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     iqn = data.get('iqn', '').strip()
     access_mode = data.get('access_mode', 'shared')
     if not iqn or not RE_IQN.match(iqn):
@@ -206,7 +206,7 @@ def iscsi_backstores():
 
 @bp.route('/api/iscsi/backstores', methods=['POST'])
 def iscsi_backstore_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     btype = data.get('type', 'fileio')
     name = data.get('name', '').strip()
     path = data.get('path', '').strip()
@@ -237,7 +237,7 @@ def iscsi_backstore_delete(btype, name):
 
 @bp.route('/api/iscsi/luns', methods=['POST'])
 def iscsi_lun_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     iqn = data.get('iqn', '').strip()
     backstore_type = data.get('backstore_type', 'fileio')
     backstore_name = data.get('backstore_name', '').strip()
@@ -262,13 +262,13 @@ def iscsi_lun_delete():
     lun = data.get('lun', '').strip()
     if not RE_IQN.match(iqn):
         return err('Invalid target IQN')
-    if not re.match(r'^lun[0-9]+$', lun):
+    if not re.match(r'^lun[0-9]+\Z', lun):
         return err('Invalid LUN')
     return jsonify(tmutate(f'/iscsi/{iqn}/tpg1/luns', 'delete', lun))
 
 @bp.route('/api/iscsi/acls', methods=['POST'])
 def iscsi_acl_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     iqn = data.get('iqn', '').strip()
     initiator_iqn = data.get('initiator_iqn', '').strip()
     if not iqn or not RE_IQN.match(iqn):
@@ -306,7 +306,7 @@ def iscsi_acl_chap():
 
 @bp.route('/api/iscsi/portals', methods=['POST'])
 def iscsi_portal_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     iqn = data.get('iqn', '').strip()
     ip = str(data.get('ip', '0.0.0.0')).strip()
     port = str(data.get('port', '3260')).strip()

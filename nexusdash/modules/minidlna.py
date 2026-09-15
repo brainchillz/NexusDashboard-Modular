@@ -48,9 +48,9 @@ DLNA_STATS_HELPER = HELPER_PREFIX + '-dlna-stats'
 MINIDLNA_MANAGED = ('friendly_name', 'port', 'network_interface', 'inotify',
                     'root_container')
 MINIDLNA_MEDIA_TYPES = {'A', 'V', 'P', ''}   # audio / video / picture / all
-RE_DLNA_NAME = re.compile(r'^[^\n\r]{0,64}$')             # friendly_name: no newline
-RE_DLNA_IFACES = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._, -]*$')  # one or more iface names
-RE_DLNA_CONTAINER = re.compile(r'^[A-Za-z0-9.,$_/-]{1,64}$')    # root_container tokens
+RE_DLNA_NAME = re.compile(r'^[^\n\r]{0,64}\Z')             # friendly_name: no newline
+RE_DLNA_IFACES = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._, -]*\Z')  # one or more iface names
+RE_DLNA_CONTAINER = re.compile(r'^[A-Za-z0-9.,$_/-]{1,64}\Z')    # root_container tokens
 
 
 def _split_media_dir(v):

@@ -31,8 +31,8 @@ from .lvm import _device_free_for_pv
 
 bp = Blueprint('mdraid', __name__)
 
-RE_MDDEV = re.compile(r'^md\d+$')
-RE_MDNAME = re.compile(r'^[a-zA-Z0-9_.-]+$')
+RE_MDDEV = re.compile(r'^md\d+\Z')
+RE_MDNAME = re.compile(r'^[a-zA-Z0-9_][a-zA-Z0-9_.-]*\Z')   # becomes /dev/md/<name>: no '.', '..' or a leading '-'
 MD_MIN_DEVICES = {'0': 2, '1': 2, '5': 3, '6': 4, '10': 2}
 
 

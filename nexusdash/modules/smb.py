@@ -190,10 +190,12 @@ def _share_row(name, kv, backend):
         'backend': backend,
         'path': kv.get('path', ''),
         'comment': kv.get('comment', ''),
-        'read_only': kv.get('read only', 'yes'),
-        'browseable': kv.get('browseable', 'yes'),
-        'guest_ok': kv.get('guest ok', 'no'),
-        'available': kv.get('available', 'yes'),
+        # Normalized to yes/no: smb.conf booleans are case-insensitive and
+        # accept true/false/1/0 too, and the UI compares against 'yes'/'no'.
+        'read_only': _yn(kv.get('read only'), 'yes'),
+        'browseable': _yn(kv.get('browseable'), 'yes'),
+        'guest_ok': _yn(kv.get('guest ok'), 'no'),
+        'available': _yn(kv.get('available'), 'yes'),
         'valid_users': kv.get('valid users', ''),
         'write_list': kv.get('write list', ''),
         'read_list': kv.get('read list', ''),
@@ -340,7 +342,7 @@ def smb_share_toggle(name):
     sections = smbconf_parse()
     if name not in sections:
         return err('No such share', 404)
-    if sections[name].get('available', 'yes') == 'no':
+    if _yn(sections[name].get('available'), 'yes') == 'no':
         sections[name].pop('available', None)  # available
     else:
         sections[name]['available'] = 'no'
@@ -386,7 +388,7 @@ def smb_global_set():
     mtg = (data.get('map to guest') or '').strip()
     enc = (data.get('smb encrypt') or '').strip()
     sign = (data.get('server signing') or '').strip()
-    if workgroup and not re.match(r'^[A-Za-z0-9_-]{1,15}$', workgroup):
+    if workgroup and not re.match(r'^[A-Za-z0-9_-]{1,15}\Z', workgroup):
         return err('Invalid workgroup')
     if not RE_COMMENT.match(server_string):
         return err('Invalid server string')
@@ -411,7 +413,7 @@ def smb_global_set():
 
 @bp.route('/api/smb/users', methods=['POST'])
 def smb_user_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
     if not username or not RE_USER.match(username):

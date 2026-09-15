@@ -20,7 +20,7 @@ LLAMA_MODELS_DIR = os.environ.get('DASHBOARD_LLAMA_MODELS_DIR', '/usr/share/mode
 LLAMA_DEFAULT_BIN = os.environ.get('DASHBOARD_LLAMA_BIN', '/usr/local/llama.cpp/llama-server')
 LLAMA_URL = os.environ.get('DASHBOARD_LLAMA_URL', 'http://localhost:8080')
 
-RE_SERVICE = re.compile(r'^[a-zA-Z0-9@._-]+$')
+RE_SERVICE = re.compile(r'^[a-zA-Z0-9@._-]+\Z')
 
 # The merged result — filled by rebuild_services() (registry.finalize()).
 # The key IS the module id: that linkage drives the disabled-module filter in

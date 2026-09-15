@@ -190,7 +190,7 @@ def gpu_get():
 # reported limits — the app's validation is a UI convenience, not the boundary.
 
 GPU_TUNE_HELPER = HELPER_PREFIX + '-gpu-tune'
-RE_GPU_PROFILE = re.compile(r'^[A-Z0-9_]{1,32}$')
+RE_GPU_PROFILE = re.compile(r'^[A-Z0-9_]{1,32}\Z')
 _gpu_tun_cache = {'ts': 0.0, 'data': None}
 
 

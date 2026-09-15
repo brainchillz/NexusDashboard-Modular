@@ -30,6 +30,20 @@ from ..core.auth import _is_admin, _hash_token, RE_USERNAME
 bp = Blueprint('nfs', __name__)
 
 EXPORTS_FILE = '/etc/exports'
+# /etc/exports is a whitespace-separated line format where '#' opens a
+# comment; RE_PATH allows all of those in a path. A path containing one wrote
+# a line that exportfs split at the wrong place (and that the delete route,
+# matching on the first token, could never find again).
+RE_EXPORT_PATH_BAD = re.compile(r'[\s#"\\]')
+
+
+def _export_path_error(path):
+    if not path or not RE_PATH.match(path):
+        return 'Invalid export path'
+    if RE_EXPORT_PATH_BAD.search(path):
+        return 'Export path may not contain spaces, quotes, backslashes or #'
+    return None
+
 
 def parse_exports(filepath=EXPORTS_FILE):
     exports = []
@@ -62,14 +76,17 @@ def nfs_exports():
 
 @bp.route('/api/nfs/exports', methods=['POST'])
 def nfs_export_create():
-    data = request.get_json()
-    path = data.get('path', '').strip()
-    clients = data.get('clients', [])
-    if not path or not RE_PATH.match(path):
-        return err('Invalid export path')
+    data = request.get_json() or {}
+    path = (data.get('path') or '').strip()
+    clients = data.get('clients') or []
+    bad = _export_path_error(path)
+    if bad:
+        return err(bad)
 
     client_entries = []
     for c in clients:
+        if not isinstance(c, dict):
+            return err('Each client must be an object with host/options')
         host = (c.get('host') or '*').strip()
         opts = (c.get('options') or 'rw,sync,no_subtree_check,no_root_squash').strip()
         if not RE_HOST.match(host):
@@ -108,9 +125,10 @@ def nfs_export_create():
 
 @bp.route('/api/nfs/exports/<path:export_path>', methods=['DELETE'])
 def nfs_export_delete(export_path):
-    if not RE_PATH.match('/' + export_path.lstrip('/')):
-        return err('Invalid export path')
     norm = '/' + export_path.lstrip('/')
+    bad = _export_path_error(norm)
+    if bad:
+        return err(bad)
     try:
         with open(EXPORTS_FILE) as f:
             lines = f.readlines()

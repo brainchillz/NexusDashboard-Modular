@@ -457,7 +457,7 @@ function renderRemoteImages() {
   const server = $('im-server').value;
   const rows = list.slice(0, 400).map(i => {
     const launch = currentRole === 'admin'
-      ? `<button class="btn btn-sm" onclick='openCreate(${JSON.stringify({name:'', type:(i.types.includes('container')?'container':'virtual-machine'), alias:i.alias})})'>Launch</button>
+      ? `<button class="btn btn-sm" onclick='openCreate(${JSON.stringify({name:'', type:(i.types.includes('container')?'container':'virtual-machine'), alias:i.alias}).replace(/'/g, '&#39;').replace(/</g, '&lt;')})'>Launch</button>
          <button class="btn btn-sm" onclick="fetchImageLocal('${jsArg(server)}','${jsArg(i.alias)}')">Fetch</button>` : '';
     return `<tr><td class="mono">${escapeHtml(i.alias)}</td><td>${escapeHtml(i.os)} ${escapeHtml(i.release)}</td>
       <td>${escapeHtml(i.variant)}</td><td>${escapeHtml(i.arch)}</td>
@@ -577,6 +577,14 @@ async function deleteNetwork(name, usedBy) {
 // ─── Edit a managed bridge: assign / remove enslaved interfaces ─────────
 function _extIfaces(n) { return (n.external_interfaces || '').split(',').map(s => s.trim()).filter(Boolean); }
 async function _netByName(name) { return (await API.get('/api/networks')).find(x => x.name === name); }
+// Write the bridge's enslaved-NIC list. LXD keeps it as the comma-separated
+// `bridge.external_interfaces` config key, which the PATCH route allowlists.
+// (Called by addBridgeIface/removeBridgeIface; defined nowhere until 3.4.3 —
+// adding a bridge interface from the UI had never worked.)
+async function _setBridgeIfaces(name, ifaces) {
+  return API.patch(`/api/networks/${encodeURIComponent(name)}`,
+                   { config: { 'bridge.external_interfaces': (ifaces || []).join(',') } });
+}
 
 async function editNetwork(name) {
   const n = await _netByName(name);

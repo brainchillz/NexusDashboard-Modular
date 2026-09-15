@@ -37,10 +37,10 @@ PENDING_WINDOW = 600   # seconds the un-finalized new address lingers before aut
 FINALIZE_WINDOW = 90   # seconds to heartbeat-confirm a finalize before it rolls back
 DHCP_LEASE_WAIT = 15   # seconds to wait for a DHCP lease so we can report the new IP
 
-RE_HOST_LABEL = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')
+RE_HOST_LABEL = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\Z')
 RE_DOMAIN = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*'
                        r'[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')
-RE_IFACE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+RE_IFACE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*\Z')
 
 # The pending network change (None when idle). 'phase' is 'dual' (new address
 # added, awaiting finalize) or 'finalizing' (committed, awaiting heartbeat).

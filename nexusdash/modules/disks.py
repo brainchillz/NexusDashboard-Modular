@@ -648,21 +648,12 @@ def fs_unmount(part):
                     'fstab_detail': fstab_res})
 
 
-@bp.route('/api/logs/<service>')
-def api_logs(service):
-    svc = resolve_service(service)
-    if not svc:
-        return err('Invalid service')
-    out, _, rc = run(['journalctl', '-u', svc, '--no-pager', '-n', '100', '--output=short-unix'])
-    if rc != 0 or not out.strip():
-        out = out or 'No logs available'
-    return jsonify({'logs': out})
-
-
-# ─── Log viewer (feature 08) ──────────────────────────────────────────
-# A journald browser over a CURATED set of units (this app, the system services,
-# and the dashboard-managed task units) — never an arbitrary unit from the client,
-# and the grep filter is allowlisted so it can't become a journalctl flag.
+# /api/logs/<service> (the Services page's Logs button) used to be defined
+# here, on the DISKS blueprint — a single-file-split artifact. That put it
+# behind the disks module toggle: any node with Disks switched off (the
+# docker host, for one) got "module 'disks' is disabled" from a button that
+# has nothing to do with disks. It now lives in modules/logs.py, an always-on
+# bare blueprint, with /api/logs/sources and /api/logs/query.
 
 
 # ─── Module descriptor (consumed by core.registry at create_app) ───────

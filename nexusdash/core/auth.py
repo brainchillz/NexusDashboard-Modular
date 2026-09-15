@@ -22,6 +22,7 @@ import hmac
 import socket
 import hashlib
 import secrets
+import threading
 from datetime import datetime
 from flask import Blueprint, jsonify, request, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -34,7 +35,7 @@ from . import sso
 bp = Blueprint('auth', __name__)
 
 AUTH_FILE = os.environ.get('DASHBOARD_AUTH_FILE', os.path.join(APP_DIR, 'auth.json'))
-RE_USERNAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')
+RE_USERNAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*\Z')
 MIN_PASSWORD_LEN = 8
 
 # Compared against when a username is unknown, so a missing user costs the
@@ -56,6 +57,15 @@ PUBLIC_ENDPOINTS = {'api_login', 'api_me', 'index', 'static', 'metrics',
 RBAC_EXEMPT = {'api_logout', 'change_password'}
 
 TOKEN_PREFIX = 'sd_'
+
+
+# Every auth.json change is load -> mutate -> save. The server is threaded,
+# and write_json_atomic only guarantees the file is never torn — two threads
+# interleaving their load/save still lose one of the writes (a token's daily
+# last_used stamp racing an admin's user creation would silently drop the new
+# user). Re-entrant so a helper that takes it can be called from a route that
+# already holds it.
+_CFG_LOCK = threading.RLock()
 
 
 def load_config():
@@ -128,12 +138,13 @@ def _touch_token(rec):
     today = datetime.now().strftime('%Y-%m-%d')
     if rec.get('last_used') == today:
         return
-    cfg = load_config()
-    for t in cfg.get('tokens', []):
-        if t.get('id') == rec.get('id'):
-            t['last_used'] = today
-            save_config(cfg)
-            return
+    with _CFG_LOCK:
+        cfg = load_config()
+        for t in cfg.get('tokens', []):
+            if t.get('id') == rec.get('id'):
+                t['last_used'] = today
+                save_config(cfg)
+                return
 
 
 def _resolve_identity():
@@ -157,6 +168,11 @@ def _resolve_identity():
 
 def ensure_bootstrap():
     """Ensure a session secret and at least one user exist. Returns the config."""
+    with _CFG_LOCK:
+        return _ensure_bootstrap_locked()
+
+
+def _ensure_bootstrap_locked():
     cfg = load_config()
     changed = False
     if not cfg.get('secret_key'):
@@ -396,18 +412,19 @@ def change_password():
     user = session.get('user')  # session-only; not applicable to API tokens
     if not user:
         return err('Only an interactive session can change a password', 401)
-    cfg = load_config()
-    rec = cfg.get('users', {}).get(user)
-    if not rec or not check_password_hash(_user_hash(rec), old):
-        return err('Current password is incorrect')
     if len(new) < MIN_PASSWORD_LEN:
         return err(f'New password must be at least {MIN_PASSWORD_LEN} characters')
-    if isinstance(rec, str):
-        rec = {'password': '', 'role': 'admin', 'smb': False}
-    rec['password'] = generate_password_hash(new)
-    rec.pop('must_change', None)  # first-run forced change satisfied
-    cfg['users'][user] = rec
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        rec = cfg.get('users', {}).get(user)
+        if not rec or not check_password_hash(_user_hash(rec), old):
+            return err('Current password is incorrect')
+        if isinstance(rec, str):
+            rec = {'password': '', 'role': 'admin', 'smb': False}
+        rec['password'] = generate_password_hash(new)
+        rec.pop('must_change', None)  # first-run forced change satisfied
+        cfg['users'][user] = rec
+        save_config(cfg)
     return jsonify({'success': True})
 
 
@@ -437,10 +454,18 @@ def users_create():
         return err('Invalid role')
     if not password:
         return err('Password required')
-    cfg = load_config()
-    cfg.setdefault('users', {})[username] = {'password': generate_password_hash(password),
-                                             'role': role, 'smb': smb}
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        users = cfg.setdefault('users', {})
+        # Create means create. Overwriting an existing record here would reset
+        # its password AND role in one unguarded step — including demoting the
+        # last administrator, which users_set_role refuses.
+        if username in users:
+            return err('User %s already exists — set its password or role instead'
+                       % username, 409)
+        users[username] = {'password': generate_password_hash(password),
+                           'role': role, 'smb': smb}
+        save_config(cfg)
     if smb:  # mirror to a Samba account with the same name/password
         run(['useradd', '-M', '-s', '/usr/sbin/nologin', username])
         run(['smbpasswd', '-a', '-s', username], input_data=f'{password}\n{password}\n')
@@ -454,16 +479,17 @@ def users_set_role(username):
     role = (request.get_json() or {}).get('role')
     if role not in ('admin', 'readonly'):
         return err('Invalid role')
-    cfg = load_config()
-    users = cfg.get('users', {})
-    if username not in users:
-        return err('No such user', 404)
-    if role != 'admin' and _user_role(users[username]) == 'admin' and _count_admins(users) <= 1:
-        return err('Cannot demote the last administrator', 409)
-    rec = users[username] if isinstance(users[username], dict) else {'password': users[username], 'smb': False}
-    rec['role'] = role
-    users[username] = rec
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        users = cfg.get('users', {})
+        if username not in users:
+            return err('No such user', 404)
+        if role != 'admin' and _user_role(users[username]) == 'admin' and _count_admins(users) <= 1:
+            return err('Cannot demote the last administrator', 409)
+        rec = users[username] if isinstance(users[username], dict) else {'password': users[username], 'smb': False}
+        rec['role'] = role
+        users[username] = rec
+        save_config(cfg)
     return jsonify({'success': True})
 
 
@@ -474,14 +500,15 @@ def users_set_password(username):
     password = (request.get_json() or {}).get('password') or ''
     if not password:
         return err('Password required')
-    cfg = load_config()
-    users = cfg.get('users', {})
-    if username not in users:
-        return err('No such user', 404)
-    rec = users[username] if isinstance(users[username], dict) else {'role': 'admin', 'smb': False}
-    rec['password'] = generate_password_hash(password)
-    users[username] = rec
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        users = cfg.get('users', {})
+        if username not in users:
+            return err('No such user', 404)
+        rec = users[username] if isinstance(users[username], dict) else {'role': 'admin', 'smb': False}
+        rec['password'] = generate_password_hash(password)
+        users[username] = rec
+        save_config(cfg)
     if rec.get('smb'):
         run(['smbpasswd', '-s', username], input_data=f'{password}\n{password}\n')
     return jsonify({'success': True})
@@ -491,17 +518,18 @@ def users_set_password(username):
 def users_delete(username):
     if not _is_admin():
         return err('Administrator access required', 403)
-    cfg = load_config()
-    users = cfg.get('users', {})
-    if username not in users:
-        return err('No such user', 404)
-    if username == session.get('user'):
-        return err('Cannot delete your own account', 409)
-    if _user_role(users[username]) == 'admin' and _count_admins(users) <= 1:
-        return err('Cannot delete the last administrator', 409)
-    was_smb = isinstance(users[username], dict) and users[username].get('smb')
-    del users[username]
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        users = cfg.get('users', {})
+        if username not in users:
+            return err('No such user', 404)
+        if username == session.get('user'):
+            return err('Cannot delete your own account', 409)
+        if _user_role(users[username]) == 'admin' and _count_admins(users) <= 1:
+            return err('Cannot delete the last administrator', 409)
+        was_smb = isinstance(users[username], dict) and users[username].get('smb')
+        del users[username]
+        save_config(cfg)
     if was_smb:
         run(['smbpasswd', '-x', username])
     return jsonify({'success': True})
@@ -533,9 +561,10 @@ def tokens_create():
     rec = {'id': 'tok-' + secrets.token_hex(6), 'name': name, 'role': role,
            'hash': _hash_token(secret), 'created': datetime.now().strftime('%Y-%m-%d'),
            'last_used': ''}
-    cfg = load_config()
-    cfg.setdefault('tokens', []).append(rec)
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        cfg.setdefault('tokens', []).append(rec)
+        save_config(cfg)
     # The secret is returned exactly once — only its SHA-256 is stored.
     return jsonify({'success': True, 'id': rec['id'], 'name': name, 'role': role, 'token': secret})
 
@@ -544,10 +573,11 @@ def tokens_create():
 def tokens_delete(tid):
     if not _is_admin():
         return err('Administrator access required', 403)
-    cfg = load_config()
-    before = len(cfg.get('tokens', []))
-    cfg['tokens'] = [t for t in cfg.get('tokens', []) if t.get('id') != tid]
-    if len(cfg.get('tokens', [])) == before:
-        return err('No such token', 404)
-    save_config(cfg)
+    with _CFG_LOCK:
+        cfg = load_config()
+        before = len(cfg.get('tokens', []))
+        cfg['tokens'] = [t for t in cfg.get('tokens', []) if t.get('id') != tid]
+        if len(cfg.get('tokens', [])) == before:
+            return err('No such token', 404)
+        save_config(cfg)
     return jsonify({'success': True})

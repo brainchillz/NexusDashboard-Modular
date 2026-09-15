@@ -98,7 +98,7 @@ def zfs_pools():
         if not line.strip():
             continue
         parts = line.split('\t')
-        if len(parts) >= 8:
+        if len(parts) >= 9:        # nine columns requested; [8] is altroot
             pools.append({
                 'name': parts[0], 'size': parts[1], 'alloc': parts[2],
                 'free': parts[3], 'cap': parts[4], 'frag': parts[5],
@@ -493,7 +493,7 @@ ZFS_KEYFORMATS = {'passphrase', 'hex', 'raw'}
 
 @bp.route('/api/zfs/datasets', methods=['POST'])
 def zfs_dataset_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     name = data.get('name', '').strip()
     properties = data.get('properties', {})
     volsize = (data.get('volsize') or '').strip()
@@ -621,7 +621,7 @@ def zfs_snapshots():
 
 @bp.route('/api/zfs/snapshots', methods=['POST'])
 def zfs_snapshot_create():
-    data = request.get_json()
+    data = request.get_json() or {}
     dataset = data.get('dataset', '').strip()
     snap_name = data.get('snap_name', '').strip()
     if not dataset or not RE_DATASET.match(dataset):
@@ -650,7 +650,7 @@ def zfs_snapshot_clone():
 
 @bp.route('/api/zfs/snapshots/rollback', methods=['POST'])
 def zfs_snapshot_rollback():
-    data = request.get_json()
+    data = request.get_json() or {}
     snap = data.get('snapshot', '').strip()
     if not snap or not RE_SNAP.match(snap):
         return err('Invalid snapshot')
@@ -790,7 +790,7 @@ def zfs_dataset_properties(name):
 
 @bp.route('/api/zfs/datasets/<path:name>/properties', methods=['PUT'])
 def zfs_dataset_set_property(name):
-    data = request.get_json()
+    data = request.get_json() or {}
     prop = data.get('property', '').strip()
     value = data.get('value', '').strip()
     if not RE_DATASET.match(name):

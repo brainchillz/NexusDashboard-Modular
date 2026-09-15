@@ -141,7 +141,7 @@ def collect_descriptors(builtins, plugins=(), extra=()):
 # (id == dirname, blueprint name == id, builtin ids can't be taken), and no
 # facade merge (a plugin global must never shadow a core name in `app.*`).
 
-RE_PLUGIN_ID = re.compile(r'^[a-z][a-z0-9-]{1,31}$')
+RE_PLUGIN_ID = re.compile(r'^[a-z][a-z0-9-]{1,31}\Z')
 
 
 def plugins_dir():
@@ -259,7 +259,7 @@ def load_plugins():
     return out
 
 
-_RE_ASSET = re.compile(r'^[A-Za-z0-9._/-]+$')
+_RE_ASSET = re.compile(r'^[A-Za-z0-9._/-]+\Z')
 
 
 def _asset_name_ok(f):

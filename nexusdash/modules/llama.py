@@ -31,8 +31,8 @@ from ..core.auth import _is_admin, _hash_token, RE_USERNAME
 
 bp = Blueprint('llama', __name__)
 
-RE_LLAMA_FLAG = re.compile(r'^-{1,2}[A-Za-z0-9][A-Za-z0-9-]*$')
-RE_LLAMA_VALUE = re.compile(r'^[A-Za-z0-9_./:,@=+-]*$')  # no spaces/quotes/newlines
+RE_LLAMA_FLAG = re.compile(r'^-{1,2}[A-Za-z0-9][A-Za-z0-9-]*\Z')
+RE_LLAMA_VALUE = re.compile(r'^[A-Za-z0-9_./:,@=+-]*\Z')  # no spaces/quotes/newlines
 
 # llama-server flags that take no value (presence-only) — used only to split an
 # existing LLAMA_OPTS string into flag/value pairs for the editor.
@@ -282,7 +282,7 @@ def llama_set_args():
 # pair to the live server in one click. State in llama_presets.json (atomic,
 # gitignored). Back-compat: early presets stored args only (a bare list); those
 # normalize to {model:'', args:[...]}.
-RE_LLAMA_PRESET = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$')
+RE_LLAMA_PRESET = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}\Z')
 LLAMA_PRESETS_FILE = os.environ.get('DASHBOARD_LLAMA_PRESETS_FILE',
                                     os.path.join(APP_DIR, 'llama_presets.json'))
 
@@ -391,12 +391,12 @@ def llama_presets_delete(name):
 
 HF_API = 'https://huggingface.co/api/models/'
 
-RE_HF_REPO = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
+RE_HF_REPO = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*\Z')
 # An rfilename may sit in a subdirectory (that is how big split quants ship), so
 # slashes are allowed — but no traversal, no leading slash, no empty segment.
-RE_HF_RFILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*\.gguf$')
-RE_HF_GROUP = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
-RE_GGUF_SPLIT = re.compile(r'^(?P<stem>.+)-(?P<idx>\d{5})-of-(?P<total>\d{5})\.gguf$')
+RE_HF_RFILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*\.gguf\Z')
+RE_HF_GROUP = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
+RE_GGUF_SPLIT = re.compile(r'^(?P<stem>.+)-(?P<idx>\d{5})-of-(?P<total>\d{5})\.gguf\Z')
 
 LLAMA_HF_FILE = os.environ.get('DASHBOARD_LLAMA_HF_FILE',
                                os.path.join(APP_DIR, 'llama_hf.json'))
@@ -758,6 +758,17 @@ def _hf_resolve(repo, rfilename):
     return 'https://huggingface.co/%s/resolve/main/%s' % (repo, rfilename)
 
 
+def _content_range_total(header):
+    """The total length from a `Content-Range: bytes */N` (or `bytes a-b/N`)
+    header, or None when it is absent or unparseable."""
+    if not header or '/' not in header:
+        return None
+    try:
+        return int(header.rsplit('/', 1)[1].strip())
+    except ValueError:
+        return None
+
+
 def _fetch_file(url, dest, token, rate_bps, on_progress, should_stop):
     """Fetch one file with resume and rate limiting. Returns bytes now on disk.
 
@@ -773,7 +784,26 @@ def _fetch_file(url, dest, token, rate_bps, on_progress, should_stop):
         req.add_header('Authorization', 'Bearer ' + token)
     if have:
         req.add_header('Range', 'bytes=%d-' % have)
-    with urllib.request.urlopen(req, timeout=60) as r:
+    try:
+        r = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as ex:
+        # 416 Range Not Satisfiable: the partial is at least as long as the
+        # remote file. That happens when the worker died between writing the
+        # last byte and renaming .partial into place — a resume then asks for
+        # `bytes=<size>-` and gets 416 every time, so the job could never
+        # finish. The response's Content-Range ("bytes */TOTAL") says how big
+        # the file really is: a partial of exactly that size IS the file, and
+        # anything else is not trustworthy and is discarded so the next
+        # attempt starts clean.
+        if ex.code != 416 or not have:
+            raise
+        total = _content_range_total(ex.headers.get('Content-Range'))
+        if total is not None and total == have:
+            os.replace(part, dest)
+            return have
+        os.remove(part)
+        return _fetch_file(url, dest, token, rate_bps, on_progress, should_stop)
+    with r:
         resumed = (getattr(r, 'status', r.getcode()) == 206)
         if have and not resumed:
             have = 0

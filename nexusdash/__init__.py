@@ -6,7 +6,8 @@ _audit_request after_request choke point, and blueprint registration for the
 core plus every feature module. Stage 2 replaces the static blueprint list
 with descriptor-driven registration (and hard module disable).
 """
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from .core.config import STATIC_DIR, TEMPLATES_DIR, SESSION_COOKIE_CONFIG
 
@@ -24,6 +25,21 @@ def create_app():
 
     app.before_request(auth.require_login)
     app.after_request(audit._audit_request)
+
+    @app.errorhandler(Exception)
+    def _unhandled(e):
+        """Every API consumer speaks JSON, so an uncaught exception must too.
+        werkzeug's default is an HTML 500 page, which the frontend's API
+        helper could not parse (every such failure surfaced as "Unexpected
+        token '<'") and the controller could not read at all. HTTP errors
+        (404, 405, 415, …) keep their own bodies; after_request still runs,
+        so the audit log records the 500 like any other failed request."""
+        if isinstance(e, HTTPException):
+            return e
+        app.logger.exception('unhandled exception on %s %s', request.method, request.path)
+        return jsonify({'success': False,
+                        'error': 'Internal error: %s: %s'
+                                 % (type(e).__name__, str(e)[:300])}), 500
 
     # Core blueprints — never module-gated. Deliberately includes svc_actions
     # (/api/service/*) and the status/summary pages so a disabled module's

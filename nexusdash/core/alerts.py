@@ -38,7 +38,7 @@ NOTIFICATIONS_FILE = os.environ.get('DASHBOARD_NOTIFICATIONS_FILE',
                                     os.path.join(APP_DIR, 'notifications.json'))
 ALERTS_TIMER = UNIT_PREFIX + '-alerts.timer'
 PW_MASK = '********'
-RE_EMAIL = re.compile(r'^[^@\s,]+@[^@\s,]+\.[^@\s,]+$')
+RE_EMAIL = re.compile(r'^[^@\s,]+@[^@\s,]+\.[^@\s,]+\Z')
 
 
 def load_notifications():

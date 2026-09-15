@@ -53,7 +53,7 @@ HISTORY_METRICS = {
     'arc_size', 'arc_hit_ratio', 'gpu_util', 'gpu_mem_pct', 'gpu_temp',
     'llama_tokens_total',
 }
-RE_HISTORY_LABEL = re.compile(r'^[A-Za-z0-9 ._:/-]{0,64}$')
+RE_HISTORY_LABEL = re.compile(r'^[A-Za-z0-9 ._:/-]{0,64}\Z')
 
 
 def _history_conn():
