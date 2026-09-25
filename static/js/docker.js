@@ -50,12 +50,52 @@ async function dkRenderTab() {
   }
 }
 
+// ─── Image update checker ───────────────────────────────
+let dkUpdateState = null;      // last /api/docker/updates result, keyed by container id
+function dkUpdateNote() {
+  if (!dkUpdateState) return '';
+  const n = dkUpdateState.updates;
+  return n ? `${n} image${n === 1 ? '' : 's'} with a newer tag at the registry` : 'all images current (as of ' + new Date(dkUpdateState.checked_at * 1000).toLocaleTimeString() + ')';
+}
+function dkUpdateBadge(c) {
+  const r = dkUpdateState && dkUpdateState.byId[c.id];
+  if (!r) return '';
+  if (r.status === 'update') return `<span class="status-badge yellow" title="${escapeHtml(r.detail)}">update available</span>`
+    + (currentRole === 'admin' ? ` <button class="btn btn-sm btn-outline" onclick="dkPullFor('${jsArg(c.image)}')" title="docker pull — then restart or recreate the container">Pull</button>` : '');
+  if (r.status === 'current') return '<span class="status-badge green" title="up to date">current</span>';
+  if (r.status === 'pinned') return '<span class="status-badge gray" title="pinned to a digest">pinned</span>';
+  if (r.status === 'local') return '<span class="status-badge gray" title="locally built or loaded — no registry to compare">local build</span>';
+  return `<span class="status-badge gray" title="${escapeHtml(r.detail || '')}">unknown</span>`;
+}
+async function dkCheckUpdates() {
+  const note = $('dk-updates-note');
+  if (note) note.textContent = 'asking the registries…';
+  try {
+    const r = await API.get('/api/docker/updates?refresh=1');
+    const byId = {};
+    for (const row of r.containers || []) byId[row.id] = row;
+    dkUpdateState = { updates: r.updates, checked_at: r.checked_at, byId };
+    dkSwitchTab('containers');
+  } catch (e) { if (note) note.textContent = e.message; else alert(e.message); }
+}
+async function dkPullFor(ref) {
+  const note = $('dk-updates-note');
+  if (note) note.textContent = `pulling ${ref}…`;
+  try {
+    await API.post('/api/docker/images/pull', { ref });
+    dkUpdateState = null;
+    if (note) note.textContent = `${ref} pulled — restart or recreate the container to run it`;
+    dkSwitchTab('containers');
+  } catch (e) { alert(e.message); }
+}
+
 // ─── Containers ─────────────────────────────────────────
 async function dkContainersView() {
   const cts = await API.get('/api/docker/containers');
   const admin = currentRole === 'admin';
-  const createBtn = admin
-    ? `<div class="toolbar" style="margin-bottom:12px"><button class="btn" onclick="dkCreateModal()">Create Container</button></div>` : '';
+  const createBtn = `<div class="toolbar" style="margin-bottom:12px">${admin ? '<button class="btn" onclick="dkCreateModal()">Create Container</button>' : ''}
+      <button class="btn btn-outline" onclick="dkCheckUpdates()" title="Compare each container's image tag with the registry">Check for image updates</button>
+      <span id="dk-updates-note" class="help">${dkUpdateNote()}</span></div>`;
   if (!cts.length) return createBtn + '<p class="help">No containers yet.</p>';
   const rows = cts.map(c => {
     const running = c.state === 'running';
@@ -71,7 +111,7 @@ async function dkContainersView() {
     }
     return `<tr>
       <td style="max-width:340px"><a href="#" onclick="dkOpenContainer('${id}');return false" class="mono">${escapeHtml(c.name)}</a>
-        <div class="help mono" style="word-break:break-all">${escapeHtml(c.image)}</div></td>
+        <div class="help mono" style="word-break:break-all">${escapeHtml(c.image)} ${dkUpdateBadge(c)}</div></td>
       <td>${dkStateBadge(c.state)} <span class="help">${escapeHtml(c.status || '')}</span></td>
       <td class="mono">${(c.ports || []).map(escapeHtml).join('<br>') || '—'}</td>
       <td>${escapeHtml(c.compose_project || '')}</td>

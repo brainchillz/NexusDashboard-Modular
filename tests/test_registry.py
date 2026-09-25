@@ -90,10 +90,10 @@ def test_module_hooks_skip_disabled(monkeypatch):
     monkeypatch.setitem(desc, 'alerts', lambda: calls.append('zfs') or [{'key': 'k', 'message': 'm'}])
     # firewall, dnsmasq, nut, upsmon and halogen ship real alerts hooks —
     # disable them so only the injected zfs hook is in play.
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall', 'dnsmasq', 'nut', 'upsmon', 'halogen'})
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'firewall', 'dnsmasq', 'nut', 'upsmon', 'halogen', 'disks'})
     got = list(registry.module_hooks('alerts'))
     assert [mid for mid, _ in got] == ['zfs']
-    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall', 'dnsmasq', 'nut', 'upsmon', 'halogen'})
+    monkeypatch.setattr(app, 'load_disabled_modules', lambda: {'zfs', 'firewall', 'dnsmasq', 'nut', 'upsmon', 'halogen', 'disks'})
     assert list(registry.module_hooks('alerts')) == []
     monkeypatch.delitem(desc, 'alerts')
 

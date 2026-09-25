@@ -210,6 +210,7 @@ def _compute_alerts():
                            'message': f"ZFS pool {pname} is {pctp}% full"})
     if _smart_health_ok() is False:
         alerts.append({'key': 'smart', 'message': 'A disk reports SMART failure'})
+    alerts.extend(_temp_alerts())
     # LVM and MD alerts follow their module toggles (off = intentional).
     if 'lvm' not in disabled_modules:
         alerts.extend(_lvm_alerts())
@@ -452,9 +453,163 @@ def _system_resources():
     }
 
 
+# ─── Disk + network throughput (/proc counters, rates by delta) ───────
+# Whole disks only — partitions, loop, zram, dm and the like would double
+# count. Net: physical/bond/bridge uplinks, not the per-container plumbing.
+RE_IO_DISK = re.compile(r'^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|md\d+|mmcblk\d+)\Z')
+RE_IO_NET_SKIP = re.compile(r'^(lo|veth.*|docker.*|br-.*|virbr.*|lxdbr.*|lxcbr.*|tap.*|vnet.*|cni.*|flannel.*)\Z')
+DISKSTATS = os.environ.get('DASHBOARD_DISKSTATS', '/proc/diskstats')
+NETDEV = os.environ.get('DASHBOARD_NETDEV', '/proc/net/dev')
+SECTOR = 512                                   # /proc/diskstats sectors are always 512 B
+
+
+def _parse_diskstats(text):
+    """{dev: (read_bytes, write_bytes)} for whole disks. Pure."""
+    out = {}
+    for line in (text or '').splitlines():
+        p = line.split()
+        if len(p) >= 14 and RE_IO_DISK.match(p[2]):
+            try:
+                out[p[2]] = (int(p[5]) * SECTOR, int(p[9]) * SECTOR)
+            except ValueError:
+                pass
+    return out
+
+
+def _parse_netdev(text):
+    """{iface: (rx_bytes, tx_bytes)}. Pure."""
+    out = {}
+    for line in (text or '').splitlines():
+        if ':' not in line:
+            continue
+        name, rest = line.split(':', 1)
+        name = name.strip()
+        p = rest.split()
+        if RE_IO_NET_SKIP.match(name) or len(p) < 16:
+            continue
+        try:
+            out[name] = (int(p[0]), int(p[8]))
+        except ValueError:
+            pass
+    return out
+
+
+def _io_counters():
+    def rd(path):
+        try:
+            with open(path) as f:
+                return f.read()
+        except OSError:
+            return ''
+    return {'ts': time.time(), 'disks': _parse_diskstats(rd(DISKSTATS)), 'net': _parse_netdev(rd(NETDEV))}
+
+
+def _io_rates(prev, cur):
+    """Bytes/second between two counter snapshots, per device and in total.
+    A counter that went backwards (reboot, hot-swap) is skipped. Pure."""
+    if not prev or not cur:
+        return None
+    dt = cur['ts'] - prev['ts']
+    if dt <= 0:
+        return None
+    out = {'interval_s': round(dt, 1), 'disks': {}, 'net': {}, 'disk_total': {'read_bps': 0, 'write_bps': 0},
+           'net_total': {'rx_bps': 0, 'tx_bps': 0}}
+    for kind, a, b, tot in (('disks', 'read_bps', 'write_bps', 'disk_total'), ('net', 'rx_bps', 'tx_bps', 'net_total')):
+        for name, (c0, c1) in cur[kind].items():
+            p = prev[kind].get(name)
+            if not p or c0 < p[0] or c1 < p[1]:
+                continue
+            r0, r1 = int((c0 - p[0]) / dt), int((c1 - p[1]) / dt)
+            out[kind][name] = {a: r0, b: r1}
+            out[tot][a] += r0
+            out[tot][b] += r1
+    return out
+
+
+_IO_PREV = {}      # in-process previous snapshot for the 30 s /api/system/resources poll
+IO_MIN_INTERVAL = 5.0   # the dashboard polls twice within a second (machine strip + panel)
+
+
+def _io_rates_live():
+    """Rates since the last snapshot that is at least IO_MIN_INTERVAL old —
+    a burst of polls in the same second must not yield a 0.2 s rate."""
+    cur = _io_counters()
+    prev = _IO_PREV.get('snap')
+    if prev is None:
+        _IO_PREV['snap'] = cur
+        return None
+    dt = cur['ts'] - prev['ts']
+    if dt < 1.0:
+        return None
+    rates = _io_rates(prev, cur)
+    if dt >= IO_MIN_INTERVAL:
+        _IO_PREV['snap'] = cur
+    return rates
+
+
+# ─── Host temperatures (hwmon) ────────────────────────────────────────
+HWMON_DIR = os.environ.get('DASHBOARD_HWMON_DIR', '/sys/class/hwmon')
+CPU_CHIPS = ('coretemp', 'k10temp', 'zenpower', 'cpu_thermal', 'acpitz', 'soc_thermal')
+TEMP_HIGH_C = {'cpu': 90, 'nvme': 70}
+
+
+def _read_sysfs(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _host_temps(base=None):
+    """[{chip, label, c}] from every hwmon temp*_input. Pure over sysfs;
+    a box with no sensors returns []."""
+    base = base or HWMON_DIR
+    out = []
+    try:
+        chips = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for h in chips:
+        d = os.path.join(base, h)
+        chip = _read_sysfs(os.path.join(d, 'name')) or h
+        try:
+            files = sorted(f for f in os.listdir(d) if f.startswith('temp') and f.endswith('_input'))
+        except OSError:
+            continue
+        for f in files:
+            raw = _read_sysfs(os.path.join(d, f))
+            if raw is None or _num(raw) is None:
+                continue
+            label = _read_sysfs(os.path.join(d, f.replace('_input', '_label'))) or f[:-6]
+            out.append({'chip': chip, 'label': label, 'c': round(_num(raw) / 1000.0, 1)})
+    return out
+
+
+def _temps_summary(temps):
+    """Headline figures: hottest CPU sensor and hottest NVMe, plus the list."""
+    cpu = [t['c'] for t in temps if t['chip'] in CPU_CHIPS]
+    nvme = [t['c'] for t in temps if t['chip'].startswith('nvme')]
+    return {'cpu': max(cpu) if cpu else None, 'nvme': max(nvme) if nvme else None,
+            'sensors': temps}
+
+
+def _temp_alerts():
+    s = _temps_summary(_host_temps())
+    out = []
+    for k, limit in TEMP_HIGH_C.items():
+        if s.get(k) is not None and s[k] >= limit:
+            out.append({'key': 'temp_high:' + k,
+                        'message': '%s temperature is %.0f°C (limit %d)' % (k.upper(), s[k], limit)})
+    return out
+
+
 @bp.route('/api/system/resources')
 def system_resources():
-    return jsonify(_system_resources())
+    r = _system_resources()
+    r['temps'] = _temps_summary(_host_temps())
+    r['io'] = _io_rates_live()          # None on the first call after a start
+    return jsonify(r)
 
 
 # ─── Host power (reboot / shutdown) ────────────────────────────────────

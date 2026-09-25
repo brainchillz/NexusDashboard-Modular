@@ -508,6 +508,26 @@ function resourcesPanel(r) {
         <div id="spark-mem"></div>
         <div class="card-sub">${fmtBytes(mem.used)} / ${fmtBytes(mem.total)} used${sw.total > 0 ? ` · swap ${fmtBytes(sw.used)}/${fmtBytes(sw.total)}` : ''}</div>
       </div>
+      ${r.io ? `<div class="card">
+        <div class="card-head">Disk I/O</div>
+        <div class="card-value" style="font-size:1.4em">${fmtBytes(r.io.disk_total.read_bps)}/s<span class="card-unit"> read</span></div>
+        <div class="card-sub">${fmtBytes(r.io.disk_total.write_bps)}/s write · ${Object.keys(r.io.disks).length} disk${Object.keys(r.io.disks).length === 1 ? '' : 's'} · last ${r.io.interval_s}s</div>
+        <div id="spark-disk"></div>
+        <div class="card-sub" title="${escapeHtml(Object.entries(r.io.disks).map(([d, v]) => `${d}: ${fmtBytes(v.read_bps)}/s r, ${fmtBytes(v.write_bps)}/s w`).join('\n'))}">${escapeHtml(Object.entries(r.io.disks).sort((a, b) => (b[1].read_bps + b[1].write_bps) - (a[1].read_bps + a[1].write_bps)).slice(0, 1).map(([d, v]) => `busiest: ${d} ${fmtBytes(v.read_bps + v.write_bps)}/s`)[0] || '')}</div>
+      </div>
+      <div class="card">
+        <div class="card-head">Network</div>
+        <div class="card-value" style="font-size:1.4em">${fmtBytes(r.io.net_total.rx_bps)}/s<span class="card-unit"> in</span></div>
+        <div class="card-sub">${fmtBytes(r.io.net_total.tx_bps)}/s out · ${Object.keys(r.io.net).length} interface${Object.keys(r.io.net).length === 1 ? '' : 's'}</div>
+        <div id="spark-net"></div>
+        <div class="card-sub" title="${escapeHtml(Object.entries(r.io.net).map(([d, v]) => `${d}: ${fmtBytes(v.rx_bps)}/s in, ${fmtBytes(v.tx_bps)}/s out`).join('\n'))}">${escapeHtml(Object.entries(r.io.net).sort((a, b) => (b[1].rx_bps + b[1].tx_bps) - (a[1].rx_bps + a[1].tx_bps)).slice(0, 1).map(([d, v]) => `busiest: ${d} ${fmtBytes(v.rx_bps + v.tx_bps)}/s`)[0] || '')}</div>
+      </div>` : ''}
+      ${r.temps && (r.temps.cpu != null || r.temps.nvme != null) ? `<div class="card">
+        <div class="card-head">Temperatures</div>
+        <div class="card-value">${r.temps.cpu != null ? r.temps.cpu.toFixed(0) : '—'}<span class="card-unit">°C cpu</span></div>
+        <div class="card-sub">${r.temps.nvme != null ? `nvme ${r.temps.nvme.toFixed(0)}°C · ` : ''}${(r.temps.sensors || []).length} sensor${(r.temps.sensors || []).length === 1 ? '' : 's'}</div>
+        <div class="card-sub" title="${escapeHtml((r.temps.sensors || []).map(t => `${t.chip} ${t.label} ${t.c}°C`).join('\n'))}">${escapeHtml((r.temps.sensors || []).filter(t => t.c === Math.max(...(r.temps.sensors || []).map(x => x.c))).map(t => `hottest: ${t.chip} ${t.label}`)[0] || '')}</div>
+      </div>` : ''}
       <div class="card">
         <div class="card-head">Uptime</div>
         <div class="card-value" style="font-size:1.4em">${fmtUptime(r.uptime_seconds)}</div>
@@ -534,10 +554,11 @@ function sparkline(points, opts) {
 
 // Lazily fill dashboard resource sparklines from the history store (last 24h).
 async function fillResourceSparks() {
-  for (const [id, metric] of [['spark-cpu', 'cpu_pct'], ['spark-mem', 'mem_pct']]) {
+  for (const [id, metric, label] of [['spark-cpu', 'cpu_pct', ''], ['spark-mem', 'mem_pct', ''],
+                                     ['spark-disk', 'disk_write_bps', 'total'], ['spark-net', 'net_rx_bps', 'total']]) {
     const el = document.getElementById(id);
     if (!el) continue;
-    try { const h = await API.get(`/api/history?metric=${metric}&since=86400`); el.innerHTML = sparkline(h.points); }
+    try { const h = await API.get(`/api/history?metric=${metric}&label=${label}&since=86400`); el.innerHTML = sparkline(h.points); }
     catch (e) {}
   }
 }

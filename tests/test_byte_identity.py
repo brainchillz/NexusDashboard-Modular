@@ -65,6 +65,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(app, 'parse_exports', lambda *a, **k: [])
     monkeypatch.setattr(app, 'smbconf_parse', lambda *a, **k: [])
     monkeypatch.setattr(app, '_smart_health_ok', lambda *a, **k: None)
+    monkeypatch.setattr(app, '_host_temps', lambda *a, **k: [])      # hwmon of the box running the suite
     monkeypatch.setattr(app, '_fs_alerts', lambda: [])
     monkeypatch.setattr(app, '_md_alerts', lambda: [])
     monkeypatch.setattr(app, '_mdadm_conf_arrays', lambda: [])
@@ -94,6 +95,8 @@ def client(monkeypatch, tmp_path):
                         lambda: {'golden': 'halogen'})
     monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'alerts', lambda: [])
     monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'metrics', lambda: [])
+    # disks' growth alerts read smart_state.json next to app.py on the box.
+    monkeypatch.setitem(app._DESCRIPTORS['disks'], 'alerts', lambda: [])
     # The updates summary block reports a live stat of /run/reboot-required —
     # pin it so the golden never depends on whether the box running the suite
     # happens to be pending a reboot.

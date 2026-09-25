@@ -35,6 +35,8 @@ from nexusdash.core import history as _m_history
 from nexusdash.core import metrics as _m_metrics
 from nexusdash.core import tasks as _m_tasks
 from nexusdash.core import alerts as _m_alerts
+from nexusdash.core import diagnostics as _m_diagnostics
+from nexusdash.core import nodeconfig as _m_nodeconfig
 from nexusdash.plugins import plugin_yaml as _m_plugin_yaml
 from nexusdash import cli as _m_cli
 
@@ -48,7 +50,7 @@ from nexusdash import cli as _m_cli
 _CORE_PRE = [_m_config, _m_runcmd, _m_validators, _m_services, _m_registry,
              _m_auth, _m_audit, _m_tls, _m_svc_actions, _m_discovery]
 _CORE_POST = [_m_summary, _m_history, _m_metrics, _m_tasks, _m_alerts,
-              _m_plugin_yaml]
+              _m_diagnostics, _m_nodeconfig, _m_plugin_yaml]
 _FACADE_MODULES = (_CORE_PRE + _m_discovery.load_builtin_modules() +
                    _CORE_POST + [_m_cli])
 

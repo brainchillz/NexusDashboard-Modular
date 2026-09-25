@@ -58,7 +58,9 @@ async function page_halogen() {
       <td>${x ? escapeHtml(x.restart_policy || 'no') : '—'}</td></tr>`; }).join('')}
     </tbody></table>
     ${st.tags_match === false ? '<div class="alert alert-danger">engine and api run DIFFERENT images — set one HALOGEN_TAG in .env and recreate.</div>' : ''}
-    <p class="help">Stack directory <code>${escapeHtml(st.working_dir || '?')}</code> · API <code>${escapeHtml(st.api_url || 'port not published')}</code></p>
+    <p class="help">Stack directory <code>${escapeHtml(st.working_dir || '?')}</code> · API <code>${escapeHtml(st.api_url || 'port not published')}</code>
+      ${st.update_available ? ` · <span class="status-badge yellow" title="highest X.Y.Z tag at the registry">${escapeHtml(st.latest_tag)} available</span> <span class="help">— read the changelog, then <code>upgrade-halogen.sh ${escapeHtml(st.latest_tag)}</code> in the stack directory</span>`
+        : st.latest_tag ? ` · <span class="status-badge green" title="highest tag at the registry is ${escapeHtml(st.latest_tag)}">latest</span>` : ''}</p>
     ${admin ? `<div class="toolbar">
       ${st.running
         ? `<button class="btn btn-sm btn-outline" onclick="hgAction('stop')">Stop</button>

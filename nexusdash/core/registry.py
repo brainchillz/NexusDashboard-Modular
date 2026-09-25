@@ -203,8 +203,12 @@ _CORE_NAV_PAGES = [
      'admin_only': True, 'order': 80},
     {'id': 'certificate', 'label': 'Certificate', 'icon': 'cert',
      'admin_only': True, 'order': 90},
+    {'id': 'nodeconfig', 'label': 'Backup & Restore', 'icon': 'file',
+     'admin_only': True, 'order': 95},
     {'id': 'audit', 'label': 'Audit Log', 'icon': 'list',
      'admin_only': True, 'order': 100},
+    {'id': 'diagnostics', 'label': 'Diagnostics', 'icon': 'wrench',
+     'admin_only': True, 'order': 105},
     {'id': 'modules', 'label': 'Modules', 'icon': 'sli',
      'admin_only': True, 'order': 110},
 ]

@@ -51,10 +51,17 @@ def _tick(module_path, func_name):
     return _run
 
 
+def _argv(module_path, func_name, argv):
+    import importlib
+    return getattr(importlib.import_module(module_path, package=__package__), func_name)(argv)
+
+
 COMMANDS = {
     'set-password': cli_set_password,
     'alerts-tick': _tick('.core.alerts', 'cli_alerts_tick'),
     'history-tick': _tick('.core.history', 'cli_history_tick'),
+    'config-export': lambda argv: _argv('.core.nodeconfig', 'cli_config_export', argv),
+    'config-restore': lambda argv: _argv('.core.nodeconfig', 'cli_config_restore', argv),
 }
 
 

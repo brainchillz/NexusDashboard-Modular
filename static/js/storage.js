@@ -66,6 +66,25 @@ async function page_disks() {
   `;
 }
 
+// Sparklines from the per-serial history rows the tick records (temperature
+// is the one that moves day to day; the defect counters should be flat lines).
+async function diskSmartTrends(serial) {
+  const el = $('smart-trend-body');
+  if (!el) return;
+  const bits = [];
+  for (const [metric, label, unit] of [['smart_temp', 'temperature', '°C'], ['smart_realloc', 'reallocated', ''],
+                                       ['smart_pending', 'pending', ''], ['smart_media_errors', 'media errors', ''],
+                                       ['smart_wear', 'wear', '%']]) {
+    try {
+      const h = await API.get(`/api/history?metric=${metric}&label=${encodeURIComponent(serial)}&res=daily&days=90`);
+      const pts = (h.points || []).filter(p => p.last != null).map(p => [Date.parse(p.day) / 1000, p.last]);
+      if (pts.length < 2) continue;
+      bits.push(`<span style="display:inline-block;margin:4px 12px 0 0">${escapeHtml(label)} ${sparkline(pts)} <span class="help">${pts[pts.length - 1][1]}${unit}</span></span>`);
+    } catch (e) { /* history off */ }
+  }
+  el.innerHTML = bits.length ? bits.join('') : 'no history yet';
+}
+
 async function diskSmart(dev) {
   openModal('SMART: ' + dev, '<div class="loading">Loading…</div>');
   try {
@@ -87,11 +106,16 @@ async function diskSmart(dev) {
     rows += row('Wear used (NVMe)', s.percentage_used != null ? s.percentage_used + ' %' : '');
     rows += row('Critical warning (NVMe)', s.critical_warning);
     const msgs = (s.messages || []).length ? `<p class="help">${escapeHtml(s.messages.join('; '))}</p>` : '';
+    const growthLabels = { reallocated: 'Reallocated sectors', pending: 'Pending sectors', uncorrectable: 'Offline uncorrectable', media_errors: 'Media errors' };
+    const growth = Object.entries(s.growth || {}).map(([k, g]) =>
+      `<div class="alert alert-danger">${escapeHtml(growthLabels[k] || k)} grew ${g.from} → ${g.to} on ${new Date(g.ts * 1000).toLocaleDateString()} — a pre-failure sign; plan a replacement.</div>`).join('');
     openModal('SMART: ' + dev, `
       <p>Overall health: <span class="status-badge ${hb}">${escapeHtml(s.health || 'unknown')}</span></p>
-      ${msgs}
+      ${growth}${msgs}
       <table class="table"><tbody>${rows || '<tr><td>No SMART data available</td></tr>'}</tbody></table>
+      ${s.serial ? `<div id="smart-trends" class="help">Trends (sampled every 5 min, kept 400 days as daily): <span id="smart-trend-body">loading…</span></div>` : ''}
     `);
+    if (s.serial) diskSmartTrends(s.serial);
   } catch(e) {
     openModal('SMART: ' + dev, `<div class="error">${escapeHtml(e.message)}</div>`);
   }
@@ -301,8 +325,61 @@ async function zfsRefresh() {
       ${configRows}
     </div>`;
   }
+  if (pools.length) html += '<div id="zfs-datasets"></div>';
   $('page-content').innerHTML = html || '<h2>ZFS Pools</h2><p>No pools created yet.</p>' + '<div class="toolbar"><button class="btn" onclick="zfsCreatePool()">+ New Pool</button></div>';
   fillPoolForecasts(pools);
+  if (pools.length) zfsDatasetsCard();
+}
+
+// Datasets: the space properties zpool never shows. A reservation is what
+// put a pool at 57% committed while zpool said 43%.
+async function zfsDatasetsCard() {
+  const box = $('zfs-datasets');
+  if (!box) return;
+  let r;
+  try { r = await API.get('/api/zfs/datasets/detail'); } catch (e) { return; }
+  const rows = (r.datasets || []).filter(d => !d.is_pool || (r.datasets || []).length === 1);
+  const all = r.datasets || [];
+  if (!all.length) return;
+  const sz = v => v == null ? '<span class="help">—</span>' : fmtBytes(v);
+  const admin = currentRole === 'admin';
+  box.innerHTML = `<div class="card"><h3>Datasets</h3>
+    <p class="help">used = data + snapshots + reservations charged to the dataset; refer = its own data. A reservation counts as used pool space whether or not it holds anything.</p>
+    <table class="table"><thead><tr><th>Dataset</th><th>Type</th><th>Used</th><th>Refer</th><th>Snapshots</th><th>Avail</th><th>Quota</th><th>Reservation</th><th>Compress</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
+    ${all.map(d => `<tr>
+      <td><code>${escapeHtml(d.name)}</code>${d.is_pool ? ' <span class="help">(pool)</span>' : ''}</td>
+      <td>${escapeHtml(d.type)}${d.volsize != null ? ` <span class="help">${fmtBytes(d.volsize)}</span>` : ''}</td>
+      <td>${sz(d.used)}</td><td>${sz(d.refer)}</td><td>${sz(d.usedbysnapshots)}</td><td>${sz(d.avail)}</td>
+      <td>${d.quota != null ? fmtBytes(d.quota) : (d.refquota != null ? fmtBytes(d.refquota) + ' <span class="help">ref</span>' : '<span class="help">—</span>')}</td>
+      <td>${d.reservation != null ? fmtBytes(d.reservation) : (d.refreservation != null ? `<span class="status-badge yellow">${fmtBytes(d.refreservation)} ref</span>` : '<span class="help">—</span>')}</td>
+      <td>${d.compressratio != null ? d.compressratio.toFixed(2) + 'x' : '—'}</td>
+      ${admin ? `<td><button class="btn btn-sm btn-outline" onclick="zfsDatasetProp('${jsArg(d.name)}')">Quota / Reservation</button></td>` : ''}
+    </tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+async function zfsDatasetProp(name) {
+  openModal(`Space limits — ${name}`, `
+    <div class="form-group"><label>Property</label>
+      <select id="dp-prop" class="form-control">
+        <option value="quota">quota — cap on this dataset and everything under it</option>
+        <option value="refquota">refquota — cap on its own data only (snapshots excluded)</option>
+        <option value="reservation">reservation — guaranteed space for it and its children</option>
+        <option value="refreservation">refreservation — guaranteed for its own data (thick zvol)</option>
+      </select></div>
+    <div class="form-group"><label>Value</label><input id="dp-value" class="form-control" placeholder="500G, 2T, or none"></div>
+    <p class="help">A reservation is charged to the pool immediately and shows as used space. <code>none</code> clears the property.</p>
+    <button class="btn" onclick="zfsDatasetPropSave('${jsArg(name)}')">Apply</button>`);
+}
+
+async function zfsDatasetPropSave(name) {
+  const property = $('dp-prop').value, value = $('dp-value').value.trim();
+  if (!value) { alert('Enter a size or none'); return; }
+  try {
+    const r = await API.put(`/api/zfs/datasets/${name.split('/').map(encodeURIComponent).join('/')}/properties`, { property, value });
+    if (!r.success) { alert(r.stderr || 'zfs set failed'); return; }
+    closeModal(); zfsRefresh();
+  } catch (e) { alert(e.message); }
 }
 
 async function page_zfs() { await zfsRefresh(); }
@@ -445,6 +522,7 @@ async function zfsCreatePool() {
     <div class="form-group"><label>Data Disks</label>
       ${checkboxList('zp-disks', free, 'No free disks — wipe a disk on the Disks page first')}
     </div>
+    <div id="zp-preview" class="help" style="margin:-4px 0 10px">Pick disks to see the usable capacity.</div>
     <details style="margin:8px 0">
       <summary class="help" style="cursor:pointer">Cache / Log / Spare devices (optional)</summary>
       <div class="form-group" style="margin-top:8px"><label>Cache (L2ARC)</label>${checkboxList('zp-cache', free, 'No free disks')}</div>
@@ -455,6 +533,24 @@ async function zfsCreatePool() {
     <p class="help">Only free (unused) disks are shown. Check any combination, in any order.</p>
     <button class="btn" onclick="zfsDoCreate()">Create Pool</button>
   `);
+  $('zp-type').addEventListener('change', zfsPoolPreview);
+  document.querySelectorAll('#zp-disks input[type=checkbox]').forEach(c => c.addEventListener('change', zfsPoolPreview));
+}
+
+// What THIS layout of THESE disks will hold — before zpool create, so the
+// raw-vs-usable arithmetic is never a surprise after the fact.
+async function zfsPoolPreview() {
+  const el = $('zp-preview');
+  if (!el) return;
+  const type = $('zp-type').value, disks = checkedValues('zp-disks');
+  if (!disks.length) { el.textContent = 'Pick disks to see the usable capacity.'; return; }
+  try {
+    const r = await API.get(`/api/zfs/pools/preview?type=${encodeURIComponent(type)}&disks=${encodeURIComponent(disks.join(','))}`);
+    if (r.error) { el.innerHTML = `<span class="status-badge red">${escapeHtml(r.error)}</span>`; return; }
+    el.innerHTML = `<strong>≈ ${escapeHtml(r.usable_h)} usable</strong> of ${escapeHtml(r.raw_h)} raw · survives <strong>${r.tolerance}</strong> disk failure${r.tolerance === 1 ? '' : 's'}`
+      + (r.wasted > 0 ? ` · <span class="status-badge yellow">${escapeHtml(r.wasted_h)} unused (mixed sizes)</span>` : '')
+      + `<br><span class="help">${escapeHtml(r.note)}</span>`;
+  } catch (e) { el.textContent = e.message; }
 }
 
 async function zfsDoCreate() {

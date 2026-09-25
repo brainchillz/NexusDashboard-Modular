@@ -133,6 +133,69 @@ def _pct(alloc, size):
     return round(alloc / size * 100) if size else 0
 
 
+# ─── Pool layout preview ──────────────────────────────────────────────
+# What a pool of THESE disks in THIS layout will hold, shown in the create
+# modal BEFORE zpool create — the raw-vs-usable surprise (3.4.4) is exactly
+# what a preview prevents. One top-level vdev, which is what the modal makes.
+POOL_LAYOUTS = {'': 0, 'mirror': None, 'raidz': 1, 'raidz2': 2, 'raidz3': 3}
+# Measured on a 5x20T raidz1: zfs reports 0.997 of (n-p)*min after its own
+# allocation padding. Close enough to say "about".
+RAIDZ_OVERHEAD = 0.997
+
+
+def estimate_pool(layout, sizes):
+    """{'usable', 'raw', 'tolerance', 'disks', 'wasted', 'note'} or
+    {'error'} for an impossible layout. Pure; sizes in bytes."""
+    sizes = [int(s) for s in sizes if s]
+    n = len(sizes)
+    if layout not in POOL_LAYOUTS:
+        return {'error': 'Unknown layout'}
+    if n == 0:
+        return {'error': 'Pick at least one disk'}
+    small, raw = min(sizes), sum(sizes)
+    wasted = raw - n * small            # mixed sizes: each disk counts as the smallest
+    if layout == '':
+        return {'usable': raw, 'raw': raw, 'tolerance': 0, 'disks': n, 'wasted': 0,
+                'note': 'no redundancy — any one disk failing loses the whole pool'}
+    if layout == 'mirror':
+        if n < 2:
+            return {'error': 'A mirror needs at least 2 disks'}
+        return {'usable': small, 'raw': raw, 'tolerance': n - 1, 'disks': n, 'wasted': wasted,
+                'note': '%d-way mirror: every disk holds a full copy' % n}
+    p = POOL_LAYOUTS[layout]
+    if n < p + 2:
+        return {'error': 'raidz%d needs at least %d disks' % (p, p + 2)}
+    return {'usable': int((n - p) * small * RAIDZ_OVERHEAD), 'raw': raw, 'tolerance': p,
+            'disks': n, 'wasted': wasted,
+            'note': '%d data + %d parity; usable is about (%d − %d) × the smallest disk'
+                    % (n - p, p, n, p)}
+
+
+@bp.route('/api/zfs/pools/preview')
+def zfs_pool_preview():
+    layout = request.args.get('type', '')
+    names = [d.strip() for d in (request.args.get('disks') or '').split(',') if d.strip()]
+    names = [n[5:] if n.startswith('/dev/') else n for n in names]
+    if any(not RE_DEVNAME.match(n) for n in names):
+        return err('Invalid device')
+    if not names:
+        return jsonify(estimate_pool(layout, []))
+    out, e, rc = run(['lsblk', '-bdno', 'NAME,SIZE'] + ['/dev/' + n for n in names], no_sudo=True)
+    if rc != 0:
+        return err(e or 'lsblk failed')
+    sizes = []
+    for line in out.strip().splitlines():
+        parts = line.split()
+        if len(parts) == 2 and _num(parts[1]) is not None:
+            sizes.append(_num(parts[1]))
+    est = estimate_pool(layout, sizes)
+    if 'usable' in est:
+        est['usable_h'] = _human_bytes(est['usable'])
+        est['raw_h'] = _human_bytes(est['raw'])
+        est['wasted_h'] = _human_bytes(est['wasted'])
+    return jsonify(est)
+
+
 @bp.route('/api/zfs/pools')
 def zfs_pools():
     out, e, rc = run(['zpool', 'list', '-Ho', 'name,size,alloc,free,cap,frag,dedup,health,altroot'])
@@ -597,6 +660,42 @@ def zfs_datasets_all():
             name, dtype = line.split('\t')[:2]
             items.append({'name': name, 'type': dtype, 'is_pool': '/' not in name})
     return jsonify(items)
+
+DATASET_PROPS = ('name', 'type', 'used', 'avail', 'refer', 'quota', 'refquota',
+                 'reservation', 'refreservation', 'compressratio', 'mountpoint',
+                 'volsize', 'usedbysnapshots')
+def _parse_dataset_rows(text):
+    """`zfs list -Hp -o <DATASET_PROPS>` → rows with ints where zfs gives
+    numbers, None for '-' and 'none' where a property is unset. Pure."""
+    rows = []
+    for line in (text or '').strip().splitlines():
+        parts = line.split('\t')
+        if len(parts) < len(DATASET_PROPS):
+            continue
+        row = dict(zip(DATASET_PROPS, parts))
+        for k in ('used', 'avail', 'refer', 'quota', 'refquota', 'reservation',
+                  'refreservation', 'volsize', 'usedbysnapshots'):
+            v = row.get(k)
+            row[k] = None if v in ('-', 'none', None) or _num(v) is None else _num(v)
+        try:
+            row['compressratio'] = float(row['compressratio'].rstrip('x'))
+        except (ValueError, AttributeError):
+            row['compressratio'] = None
+        row['is_pool'] = '/' not in row['name']
+        rows.append(row)
+    return rows
+
+
+@bp.route('/api/zfs/datasets/detail')
+def zfs_datasets_detail():
+    """Every filesystem/volume with the space properties zpool never shows:
+    quota, reservation (the thing that put a pool at 57%% while zpool said
+    43%%), refer vs used, snapshot share and the compression ratio."""
+    out, e, rc = run(['zfs', 'list', '-Hp', '-o', ','.join(DATASET_PROPS), '-t', 'filesystem,volume'])
+    if rc != 0:
+        return jsonify({'datasets': [], 'error': e})
+    return jsonify({'datasets': _parse_dataset_rows(out)})
+
 
 @bp.route('/api/zfs/zvols')
 def zfs_zvols():

@@ -26,7 +26,7 @@ from .services import (SYSTEM_SERVICES, SERVICE_OVERRIDES, resolve_service,
                              LLAMA_MODELS_DIR, LLAMA_DEFAULT_BIN, LLAMA_URL)
 from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
-from .summary import _system_resources
+from .summary import _system_resources, _host_temps, _temps_summary, _io_counters, _io_rates
 from ..modules.zfs import _parse_arcstats, _arc_summary, pool_space
 from ..modules.gpu import _gpu_snapshot
 
@@ -51,8 +51,10 @@ HISTORY_MAX_MB = int(os.environ.get('DASHBOARD_HISTORY_MAX_MB', 64))
 HISTORY_METRICS = {
     'cpu_pct', 'mem_pct', 'load1', 'pool_alloc', 'pool_size',
     'arc_size', 'arc_hit_ratio', 'gpu_util', 'gpu_mem_pct', 'gpu_temp',
-    'llama_tokens_total',
+    'llama_tokens_total', 'host_temp',
+    'disk_read_bps', 'disk_write_bps', 'net_rx_bps', 'net_tx_bps',
 }
+IO_STATE_FILE = os.environ.get('DASHBOARD_IO_STATE_FILE', os.path.join(APP_DIR, 'io_prev.json'))
 RE_HISTORY_LABEL = re.compile(r'^[A-Za-z0-9 ._:/-]{0,64}\Z')
 
 
@@ -229,6 +231,40 @@ def _history_sample():
         rows.append(('cpu_pct', '', r.get('cpu_pct')))
         rows.append(('mem_pct', '', (r.get('memory') or {}).get('pct')))
         rows.append(('load1', '', (r.get('load') or {}).get('1')))
+    except Exception:
+        pass
+    try:
+        # Throughput = delta against the previous tick's counters, which live
+        # in a small file because each tick is its own process (systemd timer).
+        cur = _io_counters()
+        try:
+            with open(IO_STATE_FILE) as f:
+                prev = json.load(f)
+        except (OSError, ValueError):
+            prev = None
+        if prev:
+            prev['disks'] = {k: tuple(v) for k, v in (prev.get('disks') or {}).items()}
+            prev['net'] = {k: tuple(v) for k, v in (prev.get('net') or {}).items()}
+        rates = _io_rates(prev, cur)
+        write_json_atomic(IO_STATE_FILE, cur)
+        if rates:
+            for dev, r in rates['disks'].items():
+                rows.append(('disk_read_bps', dev, r['read_bps']))
+                rows.append(('disk_write_bps', dev, r['write_bps']))
+            rows.append(('disk_read_bps', 'total', rates['disk_total']['read_bps']))
+            rows.append(('disk_write_bps', 'total', rates['disk_total']['write_bps']))
+            for dev, r in rates['net'].items():
+                rows.append(('net_rx_bps', dev, r['rx_bps']))
+                rows.append(('net_tx_bps', dev, r['tx_bps']))
+            rows.append(('net_rx_bps', 'total', rates['net_total']['rx_bps']))
+            rows.append(('net_tx_bps', 'total', rates['net_total']['tx_bps']))
+    except Exception:
+        pass
+    try:
+        t = _temps_summary(_host_temps())
+        for k in ('cpu', 'nvme'):
+            if t.get(k) is not None:
+                rows.append(('host_temp', k, t[k]))
     except Exception:
         pass
     try:

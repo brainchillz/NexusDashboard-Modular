@@ -70,7 +70,11 @@ EXPECTED_NAV = [
         ('users', 'Users & Tokens', 'users', None, True),
         ('notifications', 'Notifications', 'bell', None, True),
         ('certificate', 'Certificate', 'cert', None, True),
+        # 3.6.0: node configuration export / restore.
+        ('nodeconfig', 'Backup & Restore', 'file', None, True),
         ('audit', 'Audit Log', 'list', None, True),
+        # 3.6.0: every enabled module's prerequisites, pass/fail + the fix.
+        ('diagnostics', 'Diagnostics', 'wrench', None, True),
         ('modules', 'Modules', 'sli', None, True)]),
 ]
 

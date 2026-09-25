@@ -41,6 +41,8 @@ from ..core.config import APP_DIR, write_json_atomic
 from ..core.runcmd import run, err, _num
 from .docker import DockerError, docker_request, docker_raw, _dk_demux_logs, RE_DK_NAME
 from .docker_compose import _compose_args, RE_COMPOSE_PROJECT
+from . import docker_registry as reg
+import time
 
 bp = Blueprint('halogen', __name__)
 
@@ -278,6 +280,24 @@ def _container_logs(cid, tail):
     return _dk_demux_logs(raw).decode('utf-8', 'replace')
 
 
+_LATEST = {}          # image repo -> {'ts', 'tag', 'error'}; page-load only, 1 h
+
+
+def _latest_tag(image):
+    """Highest X.Y.Z tag at the registry for this image's repo (cached 1 h)."""
+    if not image or '@' in image:
+        return None, None
+    host, repo, _tag, _d = reg.parse_ref(image)
+    key = host + '/' + repo
+    hit = _LATEST.get(key)
+    if hit and time.time() - hit['ts'] < 3600:
+        return hit['tag'], hit['error']
+    tags, e = reg.list_tags(host, repo)
+    tag = reg.newest_semver(tags)
+    _LATEST[key] = {'ts': time.time(), 'tag': tag, 'error': e}
+    return tag, e
+
+
 # ─── Status assembly ──────────────────────────────────────────────────
 
 def _base_status(with_health=False):
@@ -330,6 +350,11 @@ def _base_status(with_health=False):
             st['budget'] = _budget_lines(_container_logs(engine['id'], 2000))
         except DockerError:
             st['budget'] = []
+    if with_health:
+        latest, e = _latest_tag(engine.get('image') or api.get('image'))
+        st['latest_tag'] = latest
+        st['latest_error'] = e
+        st['update_available'] = bool(latest and st['image_tag'] and reg.semver_newer(latest, st['image_tag']))
     return st
 
 

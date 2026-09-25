@@ -20,7 +20,7 @@ def create_app():
     app.config.update(SESSION_COOKIE_CONFIG)
 
     from .core import auth, audit, registry, tls, svc_actions
-    from .core import summary, history, metrics, tasks, alerts
+    from .core import summary, history, metrics, tasks, alerts, diagnostics, nodeconfig
     from .core import discovery
 
     app.before_request(auth.require_login)
@@ -47,7 +47,7 @@ def create_app():
     # System pages that live under modules/ but are core in role (logs,
     # network) arrive via discovery's bare-blueprint shape below.
     for mod in (auth, audit, registry, tls, svc_actions,
-                summary, history, metrics, tasks, alerts):
+                summary, history, metrics, tasks, alerts, diagnostics, nodeconfig):
         app.register_blueprint(mod.bp)
 
     # Everything else is DISCOVERED — no module is named here. See

@@ -263,18 +263,20 @@ def api_disks():
     out2, _, _ = run(['lsscsi', '-t'])
     return jsonify({'devices': devices, 'scsi_info': out2})
 
-@bp.route('/api/disks/<dev>/smart')
-def disk_smart(dev):
-    """SMART health for a single block device, normalized across ATA and NVMe.
-    smartctl's exit code is a bitmask (non-zero != failure), so we always parse
-    the JSON it emits rather than gating on the return code."""
-    if not RE_DEVNAME.match(dev):
-        return err('Invalid device')
-    out, e, _ = run(['smartctl', '-H', '-A', '-i', '-j', f'/dev/{dev}'])
+def _smart_info(dev, standby=False):
+    """SMART health for one block device, normalized across ATA and NVMe.
+    smartctl's exit code is a bitmask (non-zero != failure), so the JSON it
+    emits is always parsed. `standby` adds `-n standby`: a spun-down disk is
+    left asleep and reported as available:False, standby:True (the history
+    tick must never wake a whole shelf every five minutes)."""
+    argv = ['smartctl', '-H', '-A', '-i', '-j'] + (['-n', 'standby'] if standby else []) + [f'/dev/{dev}']
+    out, e, rc = run(argv)
     try:
         data = json.loads(out) if out.strip() else {}
     except json.JSONDecodeError:
-        return jsonify({'device': dev, 'available': False, 'error': e or 'no SMART data'})
+        return {'device': dev, 'available': False, 'error': e or 'no SMART data'}
+    if standby and rc & 2 and not (data.get('smart_status') or data.get('ata_smart_attributes')):
+        return {'device': dev, 'available': False, 'standby': True}
 
     status = data.get('smart_status') or {}
     info = {
@@ -311,7 +313,112 @@ def disk_smart(dev):
     msgs = [m.get('string') for m in ((data.get('smartctl') or {}).get('messages') or [])]
     if msgs:
         info['messages'] = msgs
+    return info
+
+
+@bp.route('/api/disks/<dev>/smart')
+def disk_smart(dev):
+    if not RE_DEVNAME.match(dev):
+        return err('Invalid device')
+    info = _smart_info(dev)
+    st = _load_smart_state().get(info.get('serial') or '')
+    if st:
+        info['growth'] = st.get('growth') or {}
+        info['first_seen'] = st.get('first_seen')
     return jsonify(info)
+
+
+# ─── SMART trends: counters per disk in history + growth alerts ───────
+# A pass/fail health bit says a disk HAS failed. A reallocated-sector count
+# that moved says it is failing. Every tick samples the counters that matter
+# into history (labelled by SERIAL — kernel names reorder on reboot) and
+# remembers the last value per disk in smart_state.json; any increase in a
+# defect counter is recorded as a growth event that alerts for a week.
+SMART_STATE_FILE = os.environ.get('DASHBOARD_SMART_STATE_FILE', os.path.join(APP_DIR, 'smart_state.json'))
+SMART_GROWTH_DAYS = int(os.environ.get('DASHBOARD_SMART_GROWTH_DAYS', 7))
+SMART_HISTORY_METRICS = {'smart_temp', 'smart_realloc', 'smart_pending', 'smart_uncorr',
+                         'smart_media_errors', 'smart_wear', 'smart_power_on_hours'}
+RE_SERIAL = re.compile(r'^[A-Za-z0-9 ._:/-]{1,64}\Z')       # = history's label charset
+SMART_DEFECT_COUNTERS = (('reallocated', 'reallocated sectors'), ('pending', 'pending sectors'),
+                         ('uncorrectable', 'offline-uncorrectable sectors'), ('media_errors', 'media errors'))
+
+
+def _load_smart_state():
+    try:
+        with open(SMART_STATE_FILE) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _whole_disks():
+    out, _, _ = run(['lsblk', '-J', '-o', 'NAME,TYPE'])
+    try:
+        return [d['name'] for d in json.loads(out).get('blockdevices', [])
+                if (d.get('type') or '') == 'disk' and RE_DEVNAME.match(d.get('name') or '')]
+    except (ValueError, AttributeError):
+        return []
+
+
+def _smart_apply_sample(state, info, now):
+    """Fold one disk's SMART reading into the state dict; return the history
+    rows for it. Pure over its inputs — this is what the tests pin."""
+    serial = info.get('serial')
+    if not info.get('available') or not serial or not RE_SERIAL.match(serial):
+        return []
+    prev = state.get(serial) or {}
+    entry = {'dev': info.get('device'), 'model': info.get('model'), 'ts': int(now),
+             'first_seen': prev.get('first_seen') or int(now), 'growth': dict(prev.get('growth') or {})}
+    rows = []
+    for key, metric in (('temperature_c', 'smart_temp'), ('reallocated', 'smart_realloc'),
+                        ('pending', 'smart_pending'), ('uncorrectable', 'smart_uncorr'),
+                        ('media_errors', 'smart_media_errors'), ('percentage_used', 'smart_wear'),
+                        ('power_on_hours', 'smart_power_on_hours')):
+        v = info.get(key)
+        if v is None:
+            continue
+        rows.append((metric, serial, v))
+        entry[key] = v
+    for key, _label in SMART_DEFECT_COUNTERS:
+        cur, old = info.get(key), prev.get(key)
+        if cur is not None and old is not None and cur > old:
+            entry['growth'][key] = {'from': old, 'to': cur, 'ts': int(now)}
+    state[serial] = entry
+    return rows
+
+
+def _smart_history_samples():
+    """History hook: one `smartctl -n standby` per whole disk per tick."""
+    state = _load_smart_state()
+    now = time.time()
+    rows = []
+    for dev in _whole_disks():
+        try:
+            rows.extend(_smart_apply_sample(state, _smart_info(dev, standby=True), now))
+        except Exception:
+            continue
+    write_json_atomic(SMART_STATE_FILE, state)
+    return rows
+
+
+def _smart_growth_alerts(state=None, now=None):
+    """Alerts hook: a defect counter that grew within SMART_GROWTH_DAYS."""
+    state = _load_smart_state() if state is None else state
+    now = time.time() if now is None else now
+    labels = dict(SMART_DEFECT_COUNTERS)
+    out = []
+    for serial, e in sorted(state.items()):
+        recent = {k: g for k, g in (e.get('growth') or {}).items() if now - g.get('ts', 0) < SMART_GROWTH_DAYS * 86400}
+        if not recent:
+            continue
+        parts = ['%s %s→%s' % (labels.get(k, k), g['from'], g['to']) for k, g in sorted(recent.items())]
+        last = max(g['ts'] for g in recent.values())
+        out.append({'key': 'smart_growth:' + serial,
+                    'message': 'Disk %s (%s %s): %s on %s — pre-failure sign, plan a replacement'
+                               % (e.get('dev') or '?', e.get('model') or '', serial, '; '.join(parts),
+                                  time.strftime('%Y-%m-%d', time.localtime(last)))})
+    return out
 
 @bp.route('/api/disks/<dev>/wipe', methods=['POST'])
 def disk_wipe(dev):
@@ -660,4 +767,7 @@ def fs_unmount(part):
 MODULE = {'id': 'disks', 'order': 10, 'label': 'Disks', 'category': 'Storage MGMT',
           'nav': {'cat': 'storage', 'cat_order': 20, 'pages': [
                   {'id': 'disks', 'label': 'Disks', 'icon': 'disk'}]},
-          'blueprint': bp}
+          'blueprint': bp,
+          'alerts': _smart_growth_alerts,
+          'history': _smart_history_samples,
+          'history_metrics': SMART_HISTORY_METRICS}

@@ -18,6 +18,10 @@ import urllib.parse
 from flask import Blueprint, jsonify, request
 
 from ..core.runcmd import err
+from . import docker_registry as reg
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from .containers.client import _UnixHTTPConnection
 
 bp = Blueprint('docker', __name__)
@@ -496,6 +500,93 @@ def dk_images_list():
         })
     out.sort(key=lambda x: -(x['created'] or 0))
     return jsonify(out)
+
+
+# ─── Image update checker ─────────────────────────────────────────────
+# For every container: the digest its image tag currently resolves to at the
+# registry vs the digest that was pulled (RepoDigests). What people install
+# Watchtower or diun for, minus the auto-restart. Registry answers are cached
+# per ref (30 min) so the page can re-render without re-asking; `refresh=1`
+# bypasses. Digest-pinned refs and locally built images are reported as such.
+_UPD_CACHE = {}          # ref -> {'ts', 'digest', 'error'}
+_UPD_LOCK = threading.Lock()
+UPD_CACHE_S = 1800
+
+
+def _remote_digest_cached(ref, refresh=False):
+    now = time.time()
+    with _UPD_LOCK:
+        hit = _UPD_CACHE.get(ref)
+        if hit and not refresh and now - hit['ts'] < UPD_CACHE_S:
+            return hit['digest'], hit['error'], True
+    host, repo, tag, digest = reg.parse_ref(ref)
+    if digest:
+        d, e = digest, None
+    else:
+        d, e = reg.remote_digest(host, repo, tag)
+    with _UPD_LOCK:
+        _UPD_CACHE[ref] = {'ts': now, 'digest': d, 'error': e}
+    return d, e, False
+
+
+def _image_update_rows(containers, refresh=False):
+    """Per-container rows; registry lookups run in parallel (stdlib pool)."""
+    refs = sorted({c.get('Image') for c in containers if c.get('Image') and not c.get('Image', '').startswith('sha256:')})
+    local = {}
+    for ref in refs:
+        try:
+            local[ref] = docker_request('GET', '/images/%s/json' % urllib.parse.quote(ref, safe=''), timeout=10)
+        except DockerError as e:
+            local[ref] = {'_error': e.message}
+    # A locally built/loaded image has no RepoDigests — nothing at any
+    # registry to compare, so do not even ask (docker.io answers 401 for a
+    # repo it has never heard of, which read as an error).
+    ask = [r for r in refs if (local.get(r) or {}).get('RepoDigests') or '_error' in (local.get(r) or {})]
+    remote = {r: (None, None, False) for r in refs}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        remote.update(dict(zip(ask, pool.map(lambda r: _remote_digest_cached(r, refresh), ask))))
+    rows = []
+    for c in containers:
+        ref = c.get('Image') or ''
+        row = {'id': (c.get('Id') or '')[:12], 'name': (c.get('Names') or ['/?'])[0].lstrip('/'),
+               'image': ref, 'state': c.get('State'), 'status': 'unknown', 'detail': ''}
+        if ref.startswith('sha256:') or ref not in remote:
+            row['detail'] = 'image referenced by id, not a tag'
+            rows.append(row)
+            continue
+        host, repo, tag, digest = reg.parse_ref(ref)
+        li = local.get(ref) or {}
+        rd, err_, cached = remote[ref]
+        row.update({'registry': host, 'tag': tag, 'cached': cached})
+        if digest:
+            row.update({'status': 'pinned', 'detail': 'pinned to a digest — never moves'})
+        elif '_error' in li:
+            row['detail'] = li['_error']
+        elif not li.get('RepoDigests'):
+            row.update({'status': 'local', 'detail': 'locally built or loaded image — nothing to compare'})
+        elif err_:
+            row['detail'] = err_
+        else:
+            st = reg.compare(li.get('RepoDigests'), rd)
+            row['status'] = st
+            row['remote_digest'] = rd[:19] if rd else None
+            row['detail'] = ('the %s tag has moved at %s — pull and recreate' % (tag, host) if st == 'update'
+                             else 'up to date' if st == 'current' else 'locally built or loaded image — nothing to compare')
+        rows.append(row)
+    return rows
+
+
+@bp.route('/api/docker/updates')
+def dk_image_updates():
+    refresh = request.args.get('refresh') in ('1', 'true')
+    try:
+        cts = docker_request('GET', '/containers/json?all=1')
+    except DockerError as e:
+        return _dk_error_response(e)
+    rows = _image_update_rows(cts, refresh)
+    return jsonify({'containers': rows,
+                    'updates': sum(1 for r in rows if r['status'] == 'update'),
+                    'checked_at': int(time.time())})
 
 
 @bp.route('/api/docker/images/pull', methods=['POST'])

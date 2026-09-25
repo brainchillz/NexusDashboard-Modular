@@ -841,3 +841,124 @@ async function updCheckNow() {
   try { await API.post('/api/updates/check', {}); } catch (e) { alert(e.message); return; }
   page_updates();
 }
+
+// ─── Diagnostics: every enabled module's prerequisites on THIS node ────
+async function page_diagnostics() {
+  const el = $('page-content');
+  el.innerHTML = '<h2>Diagnostics</h2><p class="help">Probing helpers, sudo grants, groups, timers, binaries and mounts…</p>';
+  let d;
+  try { d = await API.get('/api/diagnostics'); }
+  catch (e) { el.innerHTML = `<h2>Diagnostics</h2><div class="error">${escapeHtml(e.message)}</div>`; return; }
+  const cls = { ok: 'green', warn: 'yellow', fail: 'red', skip: 'gray' };
+  const c = d.counts || {};
+  const groups = {};
+  for (const ch of d.checks || []) (groups[ch.module] = groups[ch.module] || []).push(ch);
+  const order = Object.keys(groups).sort((a, b) => (a === 'core' ? -1 : b === 'core' ? 1 : a.localeCompare(b)));
+  let html = `<h2>Diagnostics</h2>
+    <div class="alert ${c.fail ? 'alert-danger' : c.warn ? 'alert-warning' : 'alert-info'}">
+      ${c.fail ? `<strong>${c.fail} failing</strong> · ` : ''}${c.warn ? `${c.warn} warning${c.warn === 1 ? '' : 's'} · ` : ''}${c.ok || 0} ok${c.skip ? ` · ${c.skip} not applicable` : ''}
+      <span class="help"> — service user <code>${escapeHtml(d.user)}</code>, unit prefix <code>${escapeHtml(d.unit_prefix)}</code>, checked ${new Date(d.checked_at * 1000).toLocaleTimeString()}</span>
+      <button class="btn btn-sm btn-outline" style="float:right" onclick="page_diagnostics()">Re-run</button>
+    </div>`;
+  for (const m of order) {
+    const rows = groups[m].sort((a, b) => ({ fail: 0, warn: 1, ok: 2, skip: 3 })[a.state] - ({ fail: 0, warn: 1, ok: 2, skip: 3 })[b.state]);
+    const bad = rows.filter(r => r.state === 'fail').length, warn = rows.filter(r => r.state === 'warn').length;
+    html += `<div class="card"><h3>${escapeHtml(m === 'core' ? 'Core' : m)} ${bad ? `<span class="status-badge red">${bad} failing</span>` : warn ? `<span class="status-badge yellow">${warn} warning${warn === 1 ? '' : 's'}</span>` : '<span class="status-badge green">ok</span>'}</h3>
+      <table class="table"><tbody>${rows.map(r => `<tr>
+        <td style="width:1%"><span class="status-badge ${cls[r.state] || 'gray'}">${escapeHtml(r.state)}</span></td>
+        <td>${escapeHtml(r.name)}<div class="help">${escapeHtml(r.detail || '')}</div></td>
+        <td>${r.fix ? `<code style="white-space:pre-wrap">${escapeHtml(r.fix)}</code>` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ─── Backup & Restore: the node's own configuration as one bundle ──────
+let ncBundle = null;     // {name, b64} of the file picked for restore
+async function page_nodeconfig() {
+  const el = $('page-content');
+  let inv;
+  try { inv = await API.get('/api/config/inventory'); }
+  catch (e) { el.innerHTML = `<h2>Backup &amp; Restore</h2><div class="error">${escapeHtml(e.message)}</div>`; return; }
+  const items = inv.items || [];
+  el.innerHTML = `<h2>Backup &amp; Restore</h2>
+    <p class="help">Everything that makes <strong>${escapeHtml(inv.hostname)}</strong> this node and is not in the code: users and token hashes, module toggles, SSO enrolment, notification targets, replication jobs and keys, schedules, the TLS pair, dnsmasq state and managed compose stacks. A rebuild becomes install → restore → restart.</p>
+    <div class="card"><h3>Export</h3>
+      <table class="table"><tbody>${items.map(i => `<tr>
+        <td style="width:1%"><input type="checkbox" class="nc-item" value="${escapeHtml(i.id)}" ${i.present ? 'checked' : 'disabled'}></td>
+        <td>${escapeHtml(i.description)}${i.secret ? ' <span class="status-badge yellow" title="contains credentials — use a passphrase">secret</span>' : ''}</td>
+        <td class="help">${i.present ? `${i.files} file${i.files === 1 ? '' : 's'} · ${fmtBytes(i.bytes)}` : 'not present here'}</td></tr>`).join('')}</tbody></table>
+      <div class="form-group"><label>Passphrase <span class="help">(recommended — the bundle holds password hashes, token hashes, the TLS key and any Hugging Face token; AES-256 with an integrity check)</span></label>
+        <input id="nc-pass" type="password" class="form-control" placeholder="8+ characters, or leave empty for a plain archive"></div>
+      <button class="btn" onclick="ncExport()">Download bundle</button> <span id="nc-export-note" class="help"></span>
+    </div>
+    <div class="card"><h3>Restore</h3>
+      <div class="form-group"><label>Bundle file</label><input id="nc-file" type="file" class="form-control" onchange="ncPick(this)"></div>
+      <div class="form-group"><label>Passphrase (if encrypted)</label><input id="nc-rpass" type="password" class="form-control"></div>
+      <button class="btn btn-outline" onclick="ncInspect()">Inspect</button> <span id="nc-inspect-note" class="help"></span>
+      <div id="nc-inspect"></div>
+    </div>
+    <div class="card"><h3>From the shell</h3><p class="help">On a fresh install with no admin session yet:</p>
+      <pre class="log">DASHBOARD_CONFIG_PASSPHRASE='…' python app.py config-restore /path/to/nexus-config-*.tar.gz.enc
+systemctl restart ${escapeHtml(inv.unit_prefix || 'nexus-dashboard')}</pre></div>`;
+}
+
+async function ncExport() {
+  const include = Array.from(document.querySelectorAll('.nc-item:checked')).map(c => c.value);
+  const passphrase = $('nc-pass').value;
+  const note = $('nc-export-note');
+  if (passphrase && passphrase.length < 8) { note.textContent = 'passphrase must be at least 8 characters'; return; }
+  if (!passphrase && !confirm('Export WITHOUT a passphrase? The bundle will contain password hashes, token hashes and the TLS private key in the clear.')) return;
+  note.textContent = 'building…';
+  try {
+    const r = await fetch('/api/config/export', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                   body: JSON.stringify({ passphrase, include }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name ? name[1] : 'nexus-config.tar.gz'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    note.textContent = `${a.download} (${fmtBytes(blob.size)}, ${r.headers.get('X-Nexus-Files')} files)`;
+  } catch (e) { note.textContent = e.message; }
+}
+
+function ncPick(input) {
+  const f = input.files && input.files[0];
+  ncBundle = null;
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { ncBundle = { name: f.name, b64: String(rd.result).split(',')[1] || '' }; };
+  rd.readAsDataURL(f);
+}
+
+async function ncInspect() {
+  const note = $('nc-inspect-note'), box = $('nc-inspect');
+  if (!ncBundle) { note.textContent = 'pick a bundle file first'; return; }
+  note.textContent = 'reading…'; box.innerHTML = '';
+  try {
+    const r = await API.post('/api/config/inspect', { bundle: ncBundle.b64, passphrase: $('nc-rpass').value });
+    const m = r.manifest || {};
+    const items = Array.from(new Set(r.files.map(f => f.item)));
+    const cls = { new: 'green', differs: 'yellow', same: 'gray' };
+    note.textContent = '';
+    box.innerHTML = `<p class="help">From <strong>${escapeHtml(m.hostname || '?')}</strong>, dashboard ${escapeHtml(m.app_version || '?')}, made ${m.created ? new Date(m.created * 1000).toLocaleString() : '?'}.</p>
+      <table class="table"><thead><tr><th></th><th>Item</th><th>File</th><th>Size</th><th>vs. this node</th></tr></thead><tbody>
+      ${r.files.map(f => `<tr><td style="width:1%"><input type="checkbox" class="nc-ritem" value="${escapeHtml(f.item)}" checked></td><td>${escapeHtml(f.item)}</td><td><code>${escapeHtml(f.path)}</code></td><td>${fmtBytes(f.bytes)}</td><td><span class="status-badge ${cls[f.status] || 'gray'}">${escapeHtml(f.status)}</span></td></tr>`).join('')}
+      </tbody></table>
+      <div class="alert alert-warning">Restoring <strong>auth.json</strong> replaces every user and token on this node with the bundle's — including your current login. Restoring the TLS pair needs a service restart to take effect.</div>
+      <button class="btn btn-danger" onclick="ncRestore()">Restore selected</button> <span id="nc-restore-note" class="help"></span>`;
+  } catch (e) { note.textContent = e.message; }
+}
+
+async function ncRestore() {
+  const items = Array.from(new Set(Array.from(document.querySelectorAll('.nc-ritem:checked')).map(c => c.value)));
+  if (!items.length) { alert('Nothing selected'); return; }
+  if (!confirm(`Overwrite this node's configuration with ${items.length} item(s) from ${ncBundle.name}?`)) return;
+  const note = $('nc-restore-note');
+  note.textContent = 'restoring…';
+  try {
+    const r = await API.post('/api/config/restore', { bundle: ncBundle.b64, passphrase: $('nc-rpass').value, items, confirm: true });
+    note.textContent = `restored ${r.written.length} file(s) from ${r.source_host}` + (r.restart_recommended ? ' — restart the service to load the TLS pair' : '');
+  } catch (e) { note.textContent = e.message; }
+}
