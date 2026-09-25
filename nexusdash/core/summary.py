@@ -547,6 +547,113 @@ def _io_rates_live():
     return rates
 
 
+# ─── Mount usage: one box per real, persistent filesystem ─────────────
+# ALLOWLIST, not a skip list: the question is "where can data live", so
+# only on-disk and network filesystems count. No tmpfs/overlay/squashfs
+# (snaps)/loop images/pseudo. ZFS collapses to ONE box per pool (every
+# dataset would otherwise repeat the pool's free space), fed by the usable
+# figures from pool_space(). Bind mounts of the same device show once.
+PERSISTENT_FSTYPES = {'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'f2fs', 'jfs', 'reiserfs', 'vfat', 'exfat', 'ntfs', 'ntfs3'}
+REMOTE_FSTYPES = {'nfs', 'nfs4', 'cifs', 'smb3', 'fuse.sshfs', 'ceph', 'glusterfs'}
+MOUNT_SKIP_PREFIXES = ('/snap/', '/var/lib/docker/', '/var/lib/containers/', '/run/', '/proc/', '/sys/', '/dev/')
+REMOTE_STATVFS_TIMEOUT = 2.0        # a hard NFS mount with its server gone would hang us
+
+
+def _parse_mount_table(text):
+    """[(source, mountpoint, fstype, opts)] from /proc/mounts text. Pure."""
+    out = []
+    for line in (text or '').splitlines():
+        p = line.split()
+        if len(p) >= 4 and p[1].startswith('/'):
+            out.append((p[0], p[1].replace('\\040', ' '), p[2], p[3].split(',')))
+    return out
+
+
+def _select_mounts(table):
+    """Which rows deserve a box: [(source, mount, fstype, kind)] with kind
+    'zfs' (one per pool, source = pool name), 'disk' or 'remote'. Pure."""
+    out, seen_dev, pool_idx = [], set(), {}
+    for src, mnt, fstype, opts in table:
+        if mnt.startswith(MOUNT_SKIP_PREFIXES) or 'ro' in opts:
+            continue
+        if fstype == 'zfs':
+            pool = src.split('/', 1)[0]
+            root_mount = mnt if '/' not in src else None
+            if pool not in pool_idx:
+                pool_idx[pool] = len(out)
+                out.append((pool, root_mount, 'zfs', 'zfs'))
+            elif root_mount:                     # root dataset seen after a child: prefer its mount
+                out[pool_idx[pool]] = (pool, root_mount, 'zfs', 'zfs')
+            continue
+        if fstype in REMOTE_FSTYPES:
+            kind = 'remote'
+        elif fstype in PERSISTENT_FSTYPES:
+            kind = 'disk'
+        else:
+            continue
+        if src.startswith('/dev/loop') or src in seen_dev:
+            continue
+        seen_dev.add(src)
+        out.append((src, mnt, fstype, kind))
+    return out
+
+
+def _statvfs_usage(path, timeout=None):
+    """(total, used, avail, pct) via statvfs; None on error/timeout."""
+    result = {}
+
+    def go():
+        try:
+            st = os.statvfs(path)
+            result['st'] = st
+        except OSError:
+            pass
+    if timeout:
+        t = threading.Thread(target=go, daemon=True)
+        t.start()
+        t.join(timeout)
+    else:
+        go()
+    st = result.get('st')
+    if not st or st.f_blocks <= 0:
+        return None
+    total, free, avail = st.f_blocks * st.f_frsize, st.f_bfree * st.f_frsize, st.f_bavail * st.f_frsize
+    return total, total - free, avail, _df_use_pct(st.f_blocks, st.f_bfree, st.f_bavail)
+
+
+def _mount_usage(mounts_text=None, pools=None):
+    """[{mount, source, fstype, kind, total, used, avail, pct}] for the
+    dashboard's Filesystems row. pools = pool_space() (injected in tests)."""
+    if mounts_text is None:
+        try:
+            with open('/proc/mounts') as f:
+                mounts_text = f.read()
+        except OSError:
+            return []
+    rows = []
+    selected = _select_mounts(_parse_mount_table(mounts_text))
+    if any(k == 'zfs' for *_r, k in selected) and pools is None:
+        pools = pool_space() or {}
+    for src, mnt, fstype, kind in selected:
+        if kind == 'zfs':
+            sp = (pools or {}).get(src)
+            if not sp:
+                continue
+            rows.append({'mount': mnt or src, 'source': src, 'fstype': 'zfs', 'kind': 'zfs',
+                         'total': sp['size'], 'used': sp['alloc'], 'avail': sp['free'],
+                         'pct': _pct(sp['alloc'], sp['size'])})
+            continue
+        u = _statvfs_usage(mnt, REMOTE_STATVFS_TIMEOUT if kind == 'remote' else None)
+        if not u:
+            rows.append({'mount': mnt, 'source': src, 'fstype': fstype, 'kind': kind,
+                         'total': None, 'used': None, 'avail': None, 'pct': None, 'error': 'unreachable'})
+            continue
+        total, used, avail, pct = u
+        rows.append({'mount': mnt, 'source': src, 'fstype': fstype, 'kind': kind,
+                     'total': total, 'used': used, 'avail': avail, 'pct': pct})
+    return rows
+
+
 # ─── Host temperatures (hwmon) ────────────────────────────────────────
 HWMON_DIR = os.environ.get('DASHBOARD_HWMON_DIR', '/sys/class/hwmon')
 CPU_CHIPS = ('coretemp', 'k10temp', 'zenpower', 'cpu_thermal', 'acpitz', 'soc_thermal')
@@ -609,6 +716,7 @@ def system_resources():
     r = _system_resources()
     r['temps'] = _temps_summary(_host_temps())
     r['io'] = _io_rates_live()          # None on the first call after a start
+    r['mounts'] = _mount_usage()
     return jsonify(r)
 
 

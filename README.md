@@ -187,7 +187,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 871 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 876 tests, no root/hardware needed
 ```
 
 ## Lineage

@@ -485,6 +485,21 @@ function fmtUptime(sec) {
   return (d ? d + 'd ' : '') + (d || h ? h + 'h ' : '') + m + 'm';
 }
 
+// One box per real, persistent filesystem: a pool (once, usable figures),
+// a disk filesystem, or a network mount. Nothing tmpfs/overlay/snap/loop.
+function mountsPanel(mounts) {
+  if (!mounts || !mounts.length) return '';
+  const kindBadge = m => m.kind === 'zfs' ? '<span class="status-badge gray">zfs pool</span>'
+    : m.kind === 'remote' ? `<span class="status-badge gray">${escapeHtml(m.fstype)}</span>` : `<span class="status-badge gray">${escapeHtml(m.fstype)}</span>`;
+  return `<h3>Filesystems</h3><div class="cards">${mounts.map(m => `
+      <div class="card">
+        <div class="card-head" title="${escapeHtml(m.source)}">${escapeHtml(m.mount)} ${kindBadge(m)}</div>
+        ${m.pct == null ? `<div class="card-value" style="font-size:1.2em">unreachable</div><div class="card-sub">${escapeHtml(m.error || '')}</div>`
+          : `<div class="card-value">${m.pct}<span class="card-unit">% used</span></div>${usageBar(m.pct)}
+             <div class="card-sub">${fmtBytes(m.used)} / ${fmtBytes(m.total)} · ${fmtBytes(m.avail)} free</div>`}
+      </div>`).join('')}</div>`;
+}
+
 function resourcesPanel(r) {
   if (!r) return '';
   const mem = r.memory || {}, sw = r.swap || {}, load = r.load || {};
@@ -773,6 +788,7 @@ async function page_dashboard() {
     ${health}
     ${cards}
     ${resourcesPanel(res)}
+    ${mountsPanel(res && res.mounts)}
   `;
   fillResourceSparks();
 }

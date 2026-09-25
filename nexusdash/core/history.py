@@ -26,7 +26,7 @@ from .services import (SYSTEM_SERVICES, SERVICE_OVERRIDES, resolve_service,
                              LLAMA_MODELS_DIR, LLAMA_DEFAULT_BIN, LLAMA_URL)
 from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
-from .summary import _system_resources, _host_temps, _temps_summary, _io_counters, _io_rates
+from .summary import _system_resources, _host_temps, _temps_summary, _io_counters, _io_rates, _mount_usage
 from ..modules.zfs import _parse_arcstats, _arc_summary, pool_space
 from ..modules.gpu import _gpu_snapshot
 
@@ -52,7 +52,7 @@ HISTORY_METRICS = {
     'cpu_pct', 'mem_pct', 'load1', 'pool_alloc', 'pool_size',
     'arc_size', 'arc_hit_ratio', 'gpu_util', 'gpu_mem_pct', 'gpu_temp',
     'llama_tokens_total', 'host_temp',
-    'disk_read_bps', 'disk_write_bps', 'net_rx_bps', 'net_tx_bps',
+    'disk_read_bps', 'disk_write_bps', 'net_rx_bps', 'net_tx_bps', 'fs_pct',
 }
 IO_STATE_FILE = os.environ.get('DASHBOARD_IO_STATE_FILE', os.path.join(APP_DIR, 'io_prev.json'))
 RE_HISTORY_LABEL = re.compile(r'^[A-Za-z0-9 ._:/-]{0,64}\Z')
@@ -258,6 +258,12 @@ def _history_sample():
                 rows.append(('net_tx_bps', dev, r['tx_bps']))
             rows.append(('net_rx_bps', 'total', rates['net_total']['rx_bps']))
             rows.append(('net_tx_bps', 'total', rates['net_total']['tx_bps']))
+    except Exception:
+        pass
+    try:
+        for m in _mount_usage():
+            if m.get('pct') is not None and RE_HISTORY_LABEL.match(m['mount']):
+                rows.append(('fs_pct', m['mount'], m['pct']))
     except Exception:
         pass
     try:
