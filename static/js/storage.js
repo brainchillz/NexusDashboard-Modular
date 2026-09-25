@@ -282,7 +282,7 @@ async function zfsRefresh() {
         <strong class="pool-name">${escapeHtml(p.name)}</strong>
         <span class="status-badge ${state === 'ONLINE' ? 'green' : 'red'}">${escapeHtml(state)}</span>
         ${pd.unstable ? `<span class="status-badge yellow" title="Members are referenced by kernel device names (e.g. /dev/nvme0n1), which can be reordered on reboot and make the pool appear DEGRADED. Click Stabilize to re-import by /dev/disk/by-id.">⚠ kernel names</span>` : ''}
-        <span class="pool-stats">${escapeHtml(p.alloc)} / ${escapeHtml(p.size)}</span>
+        <span class="pool-stats" title="${p.raw_size ? `usable space (zfs list). Raw vdev capacity incl. parity: ${escapeHtml(p.raw_alloc)} / ${escapeHtml(p.raw_size)}` : ''}">${escapeHtml(p.alloc)} / ${escapeHtml(p.size)}</span>
         <span class="pool-stats" id="fc-${escapeHtml(p.name)}"></span>
         <button class="btn btn-sm" onclick="zfsPoolDetail('${jsArg(p.name)}')">Manage</button>
         ${scanning

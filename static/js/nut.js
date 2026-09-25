@@ -63,7 +63,7 @@ function nutLiveCells(live) {
   if (!live || !live.reachable)
     return `<td colspan="3"><span class="help">${escapeHtml((live && live.error) || 'no data')}</span></td>`;
   return `
-    <td>${live.charge == null ? '—' : usageBar(live.charge)}</td>
+    <td>${live.charge == null ? '—' : levelBar(live.charge)}</td>
     <td>${nutRuntime(live.runtime)}</td>
     <td>${nutNum(live.load, '%')}${live.realpower_nominal && live.load != null
         ? ` <span class="help">(~${Math.round(live.realpower_nominal * live.load / 100)}W)</span>` : ''}</td>`;
@@ -641,6 +641,6 @@ function dashcard_upsmon(ctx) {
       <div class="card-sub">${escapeHtml(u.status || (u.reachable ? '' : 'no contact'))}
         ${u.runtime != null ? ` · ${nutRuntime(u.runtime)} left` : ''}</div>
       <div class="card-sub">${escapeHtml(u.ups || '')}${bad ? ' · ON BATTERY' : ''}</div>
-      ${u.charge == null ? '' : usageBar(u.charge)}
+      ${u.charge == null ? '' : levelBar(u.charge)}
     </div>`;
 }

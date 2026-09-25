@@ -27,7 +27,7 @@ from .services import (SYSTEM_SERVICES, SERVICE_OVERRIDES, resolve_service,
 from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
 from .summary import _system_resources
-from ..modules.zfs import _parse_arcstats, _arc_summary
+from ..modules.zfs import _parse_arcstats, _arc_summary, pool_space
 from ..modules.gpu import _gpu_snapshot
 
 bp = Blueprint('history', __name__)
@@ -232,14 +232,11 @@ def _history_sample():
     except Exception:
         pass
     try:
-        out, _, _ = run(['zpool', 'list', '-Hp', '-o', 'name,size,alloc'])
-        for line in out.strip().split('\n'):
-            if '\t' not in line:
-                continue
-            parts = line.split('\t')
-            name = parts[0]
-            rows.append(('pool_size', name, _num(parts[1]) if len(parts) > 1 else None))
-            rows.append(('pool_alloc', name, _num(parts[2]) if len(parts) > 2 else None))
+        # Usable bytes (see zfs.pool_space). Rows recorded before this change
+        # hold zpool's raw column, so a raidz pool's history steps down once.
+        for name, sp in (pool_space() or {}).items():
+            rows.append(('pool_size', name, sp['size']))
+            rows.append(('pool_alloc', name, sp['alloc']))
     except Exception:
         pass
     try:
@@ -317,10 +314,8 @@ def history_forecast():
     if len(pts) < 3:
         pts = _history_query('pool_alloc', label, int(time.time()) - HISTORY_RAW_DAYS * 86400)
     slope = _history_forecast_slope(pts)   # bytes/sec
-    out, _, _ = run(['zpool', 'list', '-Hp', '-o', 'size,alloc', label])
-    parts = out.strip().split('\t')
-    size = _num(parts[0]) if len(parts) > 0 else None
-    cur = _num(parts[1]) if len(parts) > 1 else None
+    sp = (pool_space() or {}).get(label) or {}
+    size, cur = sp.get('size'), sp.get('alloc')
     rate_day = int(slope * 86400) if slope else 0
     days_to_full = None
     if slope and slope > 0 and size and cur is not None and size > cur:

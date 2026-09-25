@@ -104,6 +104,16 @@ function usageBar(pct) {
   return `<div class="usage"><div class="usage-bar"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div></div><span class="usage-pct">${pct}%</span></div>`;
 }
 
+// The same bar with the polarity flipped, for figures where FULL is the good
+// state (battery charge). usageBar() is for consumption — it goes red at 90%,
+// which painted a healthy 100% UPS the same colour as a nearly-full disk.
+// Thresholds follow NUT's own low-battery convention: red under 20, yellow under 50.
+function levelBar(pct) {
+  pct = Math.max(0, Math.min(100, Math.round(pct)));
+  const cls = pct < 20 ? 'red' : pct < 50 ? 'yellow' : 'green';
+  return `<div class="usage"><div class="usage-bar"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div></div><span class="usage-pct">${pct}%</span></div>`;
+}
+
 // ─── Modal ──────────────────────────────────────────────
 function openModal(title, html, opts) {
   $('modal-title').textContent = title;

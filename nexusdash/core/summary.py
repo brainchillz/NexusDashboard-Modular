@@ -33,6 +33,7 @@ from ..modules.smb import smbconf_parse
 from .tasks import _task_alerts
 from ..modules.lvm import _lvm_report
 from ..modules.disks import _mdadm_conf_arrays, _zpool_disk_map
+from ..modules.zfs import pool_space, _pct
 
 bp = Blueprint('summary', __name__)
 
@@ -197,19 +198,16 @@ def _compute_alerts():
             if enabled in ('disabled', 'masked'):
                 continue
             alerts.append({'key': 'service:' + key, 'message': f"{svc['name']} service is {active}"})
-    zout, _, zrc = run(['zpool', 'list', '-Hp', '-o', 'name,size,alloc,free,health'])
-    if zrc == 0:
-        for line in zout.strip().split('\n'):
-            p = line.split('\t')
-            if len(p) >= 5 and p[0]:
-                if p[4] != 'ONLINE':
-                    alerts.append({'key': 'zfs_health:' + p[0],
-                                   'message': _zpool_health_message(p[0], p[4])})
-                size, alloc = int(p[1]), int(p[2])
-                pctp = round(alloc / size * 100) if size else 0
-                if pctp >= ALERT_FULL_PCT:
-                    alerts.append({'key': 'zfs_full:' + p[0],
-                                   'message': f"ZFS pool {p[0]} is {pctp}% full"})
+    # Usable space (zfs list), not zpool's raw parity-inclusive columns — a
+    # thick-provisioned pool can be 57% committed while zpool says 43%.
+    for pname, sp in (pool_space() or {}).items():
+        if sp['health'] != 'ONLINE':
+            alerts.append({'key': 'zfs_health:' + pname,
+                           'message': _zpool_health_message(pname, sp['health'])})
+        pctp = _pct(sp['alloc'], sp['size'])
+        if pctp >= ALERT_FULL_PCT:
+            alerts.append({'key': 'zfs_full:' + pname,
+                           'message': f"ZFS pool {pname} is {pctp}% full"})
     if _smart_health_ok() is False:
         alerts.append({'key': 'smart', 'message': 'A disk reports SMART failure'})
     # LVM and MD alerts follow their module toggles (off = intentional).
@@ -302,16 +300,14 @@ def api_summary():
     # ZFS
     pools = size = alloc = 0
     online = True
-    zout, _, zrc = run(['zpool', 'list', '-Hp', '-o', 'name,size,alloc,free,health'])
-    if zrc == 0:
-        for line in zout.strip().split('\n'):
-            p = line.split('\t')
-            if len(p) >= 5 and p[0]:
-                pools += 1
-                size += int(p[1]); alloc += int(p[2])
-                if p[4] != 'ONLINE':
-                    online = False
-    pct = round(alloc / size * 100) if size else 0
+    # USABLE bytes (root-dataset used+avail), not zpool's raw columns — see
+    # zfs.pool_space. The NexusController parses `used`/`size` off this block.
+    for sp in (pool_space() or {}).values():
+        pools += 1
+        size += sp['size']; alloc += sp['alloc']
+        if sp['health'] != 'ONLINE':
+            online = False
+    pct = _pct(alloc, size)
     scanning = 'in progress' in (run(['zpool', 'status'])[0] or '')
     zfs = {'pools': pools, 'online': online, 'used': _human_bytes(alloc),
            'size': _human_bytes(size), 'pct': pct, 'scanning': scanning}

@@ -88,22 +88,80 @@ def parse_zpool_status(output):
             pools[current_pool]['devices'].append(_parse_zpool_config_line(line))
     return pools
 
+def pool_space():
+    """Per-pool space in BYTES: {name: {size, alloc, free, health, raw_size,
+    raw_alloc, raw_free}}, or None when `zpool list` fails.
+
+    `zpool list` SIZE/ALLOC/FREE are RAW vdev capacity — on raidz/draid that
+    includes parity, so a 5x20T raidz1 lists as 90.9T when only 72.5T can ever
+    hold data (mirrors and stripes are the one case where raw == usable, which
+    is why this hid for so long). The usable figures are dataset-level and
+    only `zfs list` reports them: the root dataset's USED + AVAIL is the
+    pool's capacity as `df` and every filesystem tool present it. USED also
+    counts reservations (a thick zvol's refreservation), which is the honest
+    "committed" number — an operator cannot hand that space to anything else.
+    The raw columns are kept under raw_* so nothing is lost; when `zfs list`
+    fails the usable fields fall back to raw rather than disappearing."""
+    out, _, rc = run(['zpool', 'list', '-Hp', '-o', 'name,size,alloc,free,health'])
+    if rc != 0:
+        return None
+    pools = {}
+    for line in (out or '').strip().split('\n'):
+        p = line.split('\t')
+        if len(p) >= 5 and p[0]:
+            size, alloc, free = _num(p[1]), _num(p[2]), _num(p[3])
+            if size is None or alloc is None or free is None:
+                continue
+            pools[p[0]] = {'size': size, 'alloc': alloc, 'free': free,
+                           'health': p[4],
+                           'raw_size': size, 'raw_alloc': alloc, 'raw_free': free}
+    if not pools:
+        return pools
+    zout, _, zrc = run(['zfs', 'list', '-Hp', '-d', '0', '-o', 'name,used,avail'])
+    if zrc == 0:
+        for line in (zout or '').strip().split('\n'):
+            p = line.split('\t')
+            if len(p) >= 3 and p[0] in pools:
+                used, avail = _num(p[1]), _num(p[2])
+                if used is None or avail is None:
+                    continue
+                pools[p[0]].update({'size': used + avail, 'alloc': used, 'free': avail})
+    return pools
+
+
+def _pct(alloc, size):
+    return round(alloc / size * 100) if size else 0
+
+
 @bp.route('/api/zfs/pools')
 def zfs_pools():
     out, e, rc = run(['zpool', 'list', '-Ho', 'name,size,alloc,free,cap,frag,dedup,health,altroot'])
     if rc != 0:
         return jsonify({'pools': [], 'raw_output': e})
+    space = pool_space() or {}
     pools = []
     for line in out.strip().split('\n'):
         if not line.strip():
             continue
         parts = line.split('\t')
         if len(parts) >= 9:        # nine columns requested; [8] is altroot
-            pools.append({
+            row = {
                 'name': parts[0], 'size': parts[1], 'alloc': parts[2],
                 'free': parts[3], 'cap': parts[4], 'frag': parts[5],
                 'dedup': parts[6], 'health': parts[7], 'altroot': parts[8],
-            })
+                # zpool's own raw columns, verbatim (parity included on raidz).
+                'raw_size': parts[1], 'raw_alloc': parts[2],
+                'raw_free': parts[3], 'raw_cap': parts[4],
+            }
+            sp = space.get(parts[0])
+            if sp:
+                # size/alloc/free/cap become the USABLE figures (see pool_space).
+                row.update({
+                    'size': _human_bytes(sp['size']), 'alloc': _human_bytes(sp['alloc']),
+                    'free': _human_bytes(sp['free']), 'cap': '%d%%' % _pct(sp['alloc'], sp['size']),
+                    'size_bytes': sp['size'], 'alloc_bytes': sp['alloc'], 'free_bytes': sp['free'],
+                })
+            pools.append(row)
     return jsonify(pools)
 
 @bp.route('/api/zfs/pools/detail')

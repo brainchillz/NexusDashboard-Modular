@@ -28,6 +28,7 @@ from .registry import load_disabled_modules, module_hooks, MODULES, MODULE_IDS
 from .auth import _is_admin, _hash_token, RE_USERNAME
 from .summary import _system_resources
 from ..modules.disks import _smart_health_ok
+from ..modules.zfs import pool_space
 from ..modules.nfs import parse_exports
 from ..modules.smb import smbconf_parse
 
@@ -75,23 +76,23 @@ def _metrics_families():
         ('storagedash_swap_used_bytes', 'Used swap', 'gauge', [('', sw['used'])]),
     ]
 
-    # ZFS pools (cheap: one zpool list -Hp).
-    size_s, alloc_s, free_s, health_s = [], [], [], []
-    zout, _, zrc = run(['zpool', 'list', '-Hp', '-o', 'name,size,alloc,free,health'])
-    if zrc == 0:
-        for line in zout.strip().split('\n'):
-            p = line.split('\t')
-            if len(p) >= 5 and p[0]:
-                lbl = '{pool="%s"}' % _prom_escape(p[0])
-                size_s.append((lbl, int(p[1])))
-                alloc_s.append((lbl, int(p[2])))
-                free_s.append((lbl, int(p[3])))
-                health_s.append((lbl, 1 if p[4] == 'ONLINE' else 0))
+    # ZFS pools (cheap: one zpool list -Hp + one zfs list -Hp). size/alloc/
+    # free are USABLE bytes (root dataset used+avail); the raw_* family is
+    # zpool's own parity-inclusive column, for anyone who graphed it before.
+    size_s, alloc_s, free_s, health_s, raw_s = [], [], [], [], []
+    for pname, sp in (pool_space() or {}).items():
+        lbl = '{pool="%s"}' % _prom_escape(pname)
+        size_s.append((lbl, sp['size']))
+        alloc_s.append((lbl, sp['alloc']))
+        free_s.append((lbl, sp['free']))
+        health_s.append((lbl, 1 if sp['health'] == 'ONLINE' else 0))
+        raw_s.append((lbl, sp['raw_size']))
     fams += [
-        ('storagedash_zfs_pool_size_bytes', 'ZFS pool total size', 'gauge', size_s),
-        ('storagedash_zfs_pool_alloc_bytes', 'ZFS pool allocated', 'gauge', alloc_s),
-        ('storagedash_zfs_pool_free_bytes', 'ZFS pool free', 'gauge', free_s),
+        ('storagedash_zfs_pool_size_bytes', 'ZFS pool usable size', 'gauge', size_s),
+        ('storagedash_zfs_pool_alloc_bytes', 'ZFS pool allocated (usable bytes)', 'gauge', alloc_s),
+        ('storagedash_zfs_pool_free_bytes', 'ZFS pool free (usable bytes)', 'gauge', free_s),
         ('storagedash_zfs_pool_healthy', 'ZFS pool ONLINE (1) or not (0)', 'gauge', health_s),
+        ('storagedash_zfs_pool_raw_size_bytes', 'ZFS pool raw vdev size (parity included)', 'gauge', raw_s),
     ]
 
     # Service up/down (cheap systemctl is-active per service).
