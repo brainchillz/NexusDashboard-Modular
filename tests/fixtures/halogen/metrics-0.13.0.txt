@@ -1,0 +1,52 @@
+# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed.
+# TYPE llamacpp:prompt_tokens_total counter
+llamacpp:prompt_tokens_total 19395
+# HELP llamacpp:prompt_seconds_total Prompt process time.
+# TYPE llamacpp:prompt_seconds_total counter
+llamacpp:prompt_seconds_total 22.608
+# HELP llamacpp:tokens_predicted_total Number of generation tokens processed.
+# TYPE llamacpp:tokens_predicted_total counter
+llamacpp:tokens_predicted_total 8462
+# HELP llamacpp:tokens_predicted_seconds_total Predict process time.
+# TYPE llamacpp:tokens_predicted_seconds_total counter
+llamacpp:tokens_predicted_seconds_total 210.002
+# HELP llamacpp:prompt_tokens_seconds Average prompt throughput in tokens/s. (since the last scrape)
+# TYPE llamacpp:prompt_tokens_seconds gauge
+llamacpp:prompt_tokens_seconds 0
+# HELP llamacpp:predicted_tokens_seconds Average generation throughput in tokens/s. (since the last scrape)
+# TYPE llamacpp:predicted_tokens_seconds gauge
+# NOTE (fixture): this gauge is "since the last scrape" and read 0 on the idle capture; 40.2949 is the value the SAME node returned one scrape earlier, kept so the tests exercise a non-zero rate.
+llamacpp:predicted_tokens_seconds 40.2949
+# HELP llamacpp:requests_processing Number of requests processing.
+# TYPE llamacpp:requests_processing gauge
+llamacpp:requests_processing 0
+# HELP llamacpp:requests_deferred Number of requests deferred.
+# TYPE llamacpp:requests_deferred gauge
+llamacpp:requests_deferred 0
+# HELP llamacpp:kv_cache_tokens KV-cache tokens (positions the engine's pool holds, busy and held regions).
+# TYPE llamacpp:kv_cache_tokens gauge
+llamacpp:kv_cache_tokens 86528
+# HELP llamacpp:kv_cache_usage_ratio KV-cache usage. 1 means 100 percent usage. (positions held over the pool)
+# TYPE llamacpp:kv_cache_usage_ratio gauge
+llamacpp:kv_cache_usage_ratio 0.165039
+# HELP halogen:requests_total Requests completed.
+# TYPE halogen:requests_total counter
+halogen:requests_total 9
+# HELP halogen:prompt_tokens_cached_total Prompt tokens the prompt cache covered (not processed).
+# TYPE halogen:prompt_tokens_cached_total counter
+halogen:prompt_tokens_cached_total 60796
+# HELP halogen:draft_tokens_total Tokens proposed by the draft head and prompt lookup.
+# TYPE halogen:draft_tokens_total counter
+halogen:draft_tokens_total 5259
+# HELP halogen:draft_tokens_accepted_total Of those, accepted.
+# TYPE halogen:draft_tokens_accepted_total counter
+halogen:draft_tokens_accepted_total 3180
+# HELP halogen:structured_requests_total Requests decoded under a JSON schema.
+# TYPE halogen:structured_requests_total counter
+halogen:structured_requests_total 0
+# HELP halogen:kv_pool_positions The KV pool, in positions.
+# TYPE halogen:kv_pool_positions gauge
+halogen:kv_pool_positions 524288
+# HELP halogen:kv_pool_reserved_tokens Positions the requests holding a front-end slot asked for (prompt + max_tokens each), admitted or not.
+# TYPE halogen:kv_pool_reserved_tokens gauge
+halogen:kv_pool_reserved_tokens 0

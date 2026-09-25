@@ -1,0 +1,60 @@
+halogen: halogen-flash-server 0.13.0, mode engine
+halogen: quality sidecar present (2.4G) at /models/qwen38-flash-next-w4b.overlay.hgn
+halogen: vision ON, tower /models/qwen38-flash-next-vision.hgn (857M)
+halogen: KV budget 4 slot(s) over one 524288-position pool (each request up to 262144) = 14.9 GiB (~28 KiB/position incl. block scratch + ~115 MiB/slot) + 2.2 GiB prompt cache in RAM, on top of roughly 68 GiB of weights and 21.3 GiB of working memory (HALOGEN_MAX_TOK 32768). Those last two are estimates for this pre-flight check; the engine prints its measured figures once loaded, including the large lookup table it reads from disk and never holds. MemAvailable now 121.7 GiB.
+halogen: WARNING: that budget is close to or over what this host has free (the engine refuses the last pin under 16 GiB of MemAvailable).
+halogen: GTT in use before this start: 0.0 GiB of 124.0 (124.0 free; this start puts about 31.6 GiB there)
+kv pool: vision tower configured, 1.97 GiB (0.84 resident weights + 1.14 worst-case scratch at HALOGEN_VISION_MAX_PIXELS), charged against the 1.5 GiB margin
+kv pool: host RAM 125 GiB, less 67.7 resident weights and 20.0 reserved for the n-gram page cache and the OS = 37.4 GiB for the device
+kv pool: 524288 positions, ~35.0 GiB (20.6 GiB of it for everything but the pool, at max_tok 32768)
+startup [   0.0 s] host memory: 22849 contiguous 2 MiB blocks of host memory free (45698 MiB)
+startup [   0.0 s] pinning weights (reads the checkpoint from disk when it is not already in the page cache; this is usually the slowest step)
+startup [   1.3 s] weights pinned: 22782 contiguous 2 MiB blocks free (45564 MiB), 0 compaction stalls during that step (0 failed)
+startup [   1.3 s] preparing weights
+startup [   1.4 s] preparing weights, layer 0 of 48
+startup [   1.4 s] preparing weights, layer 8 of 48
+startup [   1.4 s] preparing weights, layer 16 of 48
+startup [   1.5 s] preparing weights, layer 24 of 48
+startup [   1.5 s] preparing weights, layer 32 of 48
+startup [   1.5 s] preparing weights, layer 40 of 48
+startup [   1.5 s] weights ready; reserving working memory
+startup [   2.6 s] reserving the KV pool, 524288 positions (about 14.4 GiB)
+startup [   3.4 s] KV pool reserved: 1526 contiguous 2 MiB blocks free (3052 MiB), 0 compaction stalls during that step (0 failed)
+startup [   3.4 s] model ready
+startup [   3.4 s] reserving 3 more serving slot(s)
+slots: 1 -> 4 POOLED, 111.0 MiB each of O(1) state; the KV is ONE pool of 524288 positions (13312.0 MiB) carved into per-request regions
+startup [   3.4 s] preparing the prompt cache
+flash_serve: prompt cache ON, resume-anywhere (20 entries, snapshot every request, chunk 32768, 111 MiB each at ctx 262144): a warm answer is NOT bitwise the cold one
+flash_serve: prompt cache keeps the KV in place (HALOGEN_CACHE_INPLACE=1): the entry is the O(1) state, the KV rows are never copied; a follow-up turn prefills only its new tokens
+startup [   3.4 s] memory: 68.0 GiB of weights locked in RAM, 14.4 GiB of KV pool, 21.4 GiB of working memory, 103.8 GiB in all
+startup [   3.4 s] memory: the model's 47.7 GiB lookup table is NOT held in RAM. It is read from disk through the file cache as each request needs it, which is why this server holds less than the checkpoint is large
+startup [   3.4 s] host memory left for everything else: 1306 contiguous 2 MiB blocks (10.9 GiB total, most of it not contiguous)
+startup [   3.4 s] free(1) and MemAvailable will report about 78.9 GiB instead: the kernel counts this server's locked weights as reclaimable file cache, and they cannot be reclaimed
+startup [   3.4 s] opening the socket
+flash_serve: WARNING binding 0.0.0.0: the token protocol has no auth; keep this port unpublished
+flash_serve: a prompt admitted beside active streams prefills in pieces of 32768 tokens with a decode tick between them (HALOGEN_ADMIT_CHUNK; 0 = the engine's own chunk, which keeps the admitted prompt bitwise its alone self; -1 = the whole prompt at once)
+flash_serve: listening on 0.0.0.0:8730, 4 slots over ONE 524288-position KV pool, each request up to 262144 (it reserves prompt + max_tokens), max_tok 32768, BATCHED greedy or sampled; MTP depth-1 selectable (drafter 1, speculates while alone)
+halogen: engine listening after 6s
+halogen: engine watchdog on, 180s of silence takes the container down
+flash_serve: grammar: vocabulary of 248077 tokens (248044 plain, longest 128 B) in 46 ms
+flash_serve: req 2 prefill 0/40058 tokens, 0.0 s
+flash_serve: req 2 prefill 32768/40058 tokens, 20.0 s
+flash_serve: req 2 prefill 40058/40058 tokens, 25.4 s
+flash_serve: req 3 generated 2 tokens, 0.0 s
+flash_serve: req 4 generated 2 tokens, 0.0 s
+flash_serve: req 5 generated 2 tokens, 0.0 s
+flash_serve: req 6 generated 2 tokens, 0.0 s
+flash_serve: req 7 generated 2 tokens, 0.0 s
+flash_serve: req 8 generated 2 tokens, 0.0 s
+flash_serve: req 9 generated 2 tokens, 0.0 s
+flash_serve: req 10 generated 2 tokens, 0.0 s
+flash_serve: req 11 generated 2 tokens, 0.0 s
+flash_serve: req 12 generated 2 tokens, 0.0 s
+flash_serve: req 13 generated 2 tokens, 0.0 s
+flash_serve: req 14 generated 2 tokens, 0.0 s
+flash_serve: req 15 generated 2 tokens, 0.0 s
+flash_serve: req 16 generated 2 tokens, 0.0 s
+flash_serve: req 17 generated 2 tokens, 0.1 s
+flash_serve: req 18 generated 2 tokens, 0.0 s
+flash_serve: req 19 generated 2 tokens, 0.0 s
+flash_serve: req 20 generated 2 tokens, 0.0 s

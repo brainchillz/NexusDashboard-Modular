@@ -2,7 +2,7 @@
 
 A single modular web dashboard for a whole home-lab fleet: **storage** (ZFS,
 LVM, MD RAID, disks), **sharing** (iSCSI, NFS, SMB, DLNA), **AI tools**
-(llama.cpp, GPU), **containers & VMs** (LXD/Incus), **DNS/DHCP** (dnsmasq),
+(llama.cpp, Halogen, GPU), **containers & VMs** (LXD/Incus), **DNS/DHCP** (dnsmasq),
 **UPS/power** (NUT), and **system management** (network/netplan, host firewall
 (ufw), services, logs, scheduled tasks, alerting, metrics, history) — one app,
 one login, one audit trail per node.
@@ -187,7 +187,7 @@ capabilities and the hard-disable enforcement from those.
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
-./venv/bin/python -m pytest tests/ -q     # 778 tests, no root/hardware needed
+./venv/bin/python -m pytest tests/ -q     # 812 tests, no root/hardware needed
 ```
 
 ## Lineage

@@ -1,0 +1,683 @@
+[
+    {
+        "Id": "b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0",
+        "Created": "2026-09-21T20:21:05.899996266Z",
+        "Path": "/usr/local/bin/entrypoint.sh",
+        "Args": [
+            "engine"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 2383,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-09-22T00:33:20.527991891Z",
+            "FinishedAt": "2026-09-22T00:32:11.531136981Z",
+            "Health": {
+                "Status": "healthy",
+                "FailingStreak": 0,
+                "Log": [
+                    {
+                        "Start": "2026-09-25T17:25:14.033219069-04:00",
+                        "End": "2026-09-25T17:25:14.092329361-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:24.092885522-04:00",
+                        "End": "2026-09-25T17:25:24.144235314-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:34.145351911-04:00",
+                        "End": "2026-09-25T17:25:34.73273109-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:44.733070439-04:00",
+                        "End": "2026-09-25T17:25:45.790455605-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:55.791533676-04:00",
+                        "End": "2026-09-25T17:25:55.840671281-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    }
+                ]
+            }
+        },
+        "Image": "sha256:75ac54e1cb4eceea3e1b69e79b6c739cf64bc2a0ff6914d274ca0c110fbda45f",
+        "ResolvConfPath": "/var/lib/docker/containers/b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0/hostname",
+        "HostsPath": "/var/lib/docker/containers/b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0/hosts",
+        "LogPath": "/var/lib/docker/containers/b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0/b195785be5c9a79e84f04fc4f499d35b6cc9a17f0c06184ac4b54b41222fddd0-json.log",
+        "Name": "/halogen-engine",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/srv/halogen/models:/models:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "halogen_default",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": [],
+            "GroupAdd": [
+                "44",
+                "992"
+            ],
+            "IpcMode": "host",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": [
+                "label=disable"
+            ],
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": null,
+            "BlkioDeviceReadBps": null,
+            "BlkioDeviceWriteBps": null,
+            "BlkioDeviceReadIOps": null,
+            "BlkioDeviceWriteIOps": null,
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [
+                {
+                    "PathOnHost": "/dev/kfd",
+                    "PathInContainer": "/dev/kfd",
+                    "CgroupPermissions": "rwm"
+                },
+                {
+                    "PathOnHost": "/dev/dri",
+                    "PathInContainer": "/dev/dri",
+                    "CgroupPermissions": "rwm"
+                }
+            ],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [
+                {
+                    "Name": "memlock",
+                    "Hard": -1,
+                    "Soft": -1
+                }
+            ],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/a3d0fc512a4525387a5bafbc86f5846845a7a2ce3183b1872c5da0e1a7749a98-init/diff:/var/lib/docker/overlay2/a8682073dd4b2df37416ec9fc6c98fd5c1313ea73c6de6ea02af1e66bded5267/diff:/var/lib/docker/overlay2/9953b72d59cb256fd715231ab8aa3655268b3d6aaf8e17228770650ca3babe8e/diff:/var/lib/docker/overlay2/d218013a08e3320f623798d8340200ad606af72181e5159b3dfbfc39a1c6254f/diff:/var/lib/docker/overlay2/5a11b30dae70899284b71c9ed063081bdea50e4310707c7b09ee8c1a1731045d/diff:/var/lib/docker/overlay2/ed8388c2c77ef61e97b07b84f52b70c46206d7b1e49e601d730fb9e158ea66fc/diff:/var/lib/docker/overlay2/c0cbf24340d875f32bd49c3d9d521e30d404c54c52455446ad85a294315b7ad7/diff:/var/lib/docker/overlay2/cdff9bd4f00f2b502c5cd92cf4e9e275e03ec515b9d88f2ae6906a90e3a8b7a5/diff:/var/lib/docker/overlay2/0d60e9a38a3e81ce564ca54cd0f72f2f99a36eb7eac1d75cd838a4c0bf173cac/diff:/var/lib/docker/overlay2/966235d01666a57fc066a33d75ea3e534e17e1d9f2c755fb5926bfdf10488bb0/diff:/var/lib/docker/overlay2/272f64e5dac70116fda9dbc03206e8bf62c15b20f5fd111d7fc577daababf831/diff:/var/lib/docker/overlay2/d3286facbca72819d80d281aa094333bb9cc3b2b889bdf302c9a763658c8845c/diff:/var/lib/docker/overlay2/4ece7801454ab4c9091a70a2e589a7dcca87630d40ac226592376dc44187c119/diff:/var/lib/docker/overlay2/04d8d9796592e6d34d9dd2b7c16d46792609393549832605f632aa148347d794/diff:/var/lib/docker/overlay2/002cc24e8237da144df9633adf0f63f379a99b21c0c89d05101af87dbe55d283/diff:/var/lib/docker/overlay2/dbc82a86a597a9748d9acec7d623299d39275d18520c93b9d00ee703364a7b6f/diff:/var/lib/docker/overlay2/9207a9b5ae376ea25afabf79c59de703ccfc133f29e33b3e05d90d6ee4dd4ce5/diff:/var/lib/docker/overlay2/e25e59a8459d5c898a996e048206f06793bda7bde07f578069663e51ab46cc67/diff",
+                "MergedDir": "/var/lib/docker/overlay2/a3d0fc512a4525387a5bafbc86f5846845a7a2ce3183b1872c5da0e1a7749a98/merged",
+                "UpperDir": "/var/lib/docker/overlay2/a3d0fc512a4525387a5bafbc86f5846845a7a2ce3183b1872c5da0e1a7749a98/diff",
+                "WorkDir": "/var/lib/docker/overlay2/a3d0fc512a4525387a5bafbc86f5846845a7a2ce3183b1872c5da0e1a7749a98/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/srv/halogen/models",
+                "Destination": "/models",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "b195785be5c9",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "ExposedPorts": {
+                "8731/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HALOGEN_KV_SLOTS=4",
+                "HALOGEN_PROMPT_CACHE=2",
+                "HALOGEN_BIND=0.0.0.0",
+                "HALOGEN_VISION_TOWER=/models/qwen38-flash-next-vision.hgn",
+                "HALOGEN_CHECKPOINT=/models/qwen38-flash-next-w4b.hgn",
+                "HALOGEN_CTX=262144",
+                "HALOGEN_KV_POOL_POSITIONS=524288",
+                "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG=C.UTF-8",
+                "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                "PYTHON_VERSION=3.12.14",
+                "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+                "ROCM_SITE=/usr/local/lib/python3.12/site-packages",
+                "ROCM_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core",
+                "HIP_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core",
+                "HIP_DEVICE_LIB_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/amdgcn/bitcode",
+                "LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core/lib:/usr/local/lib/python3.12/site-packages/_rocm_sdk_libraries/lib",
+                "HALOGEN_ARCH=gfx1151",
+                "HIP_FORCE_DEV_KERNARG=1",
+                "PYTHONUNBUFFERED=1",
+                "HF_HUB_OFFLINE=1",
+                "TRANSFORMERS_VERBOSITY=error",
+                "HALOGEN_ATTN_FA=64",
+                "HALOGEN_PREFILL_CHUNK=32768",
+                "HALOGEN_MAX_TOK=32768",
+                "HALOGEN_MATMUL_ALGOS=1",
+                "HALOGEN_MATMUL_BUCKET=1",
+                "HALOGEN_MATMUL_TUNING_FILE=/opt/halogen/flash-tune.plan",
+                "HALOGEN_TOKENIZER=/tokenizer",
+                "HALOGEN_PORT=8730",
+                "HALOGEN_API_PORT=8731",
+                "HALOGEN_MAX_TOKENS_CAP=65536",
+                "HALOGEN_QUEUE_TIMEOUT=3600",
+                "HALOGEN_IMAGE_VERSION=0.13.0",
+                "HALOGEN_IMAGE_MODES=all engine api bench sweep convert inspect verify ppl niah"
+            ],
+            "Cmd": [
+                "engine"
+            ],
+            "Healthcheck": {
+                "Test": [
+                    "CMD",
+                    "/usr/local/bin/halogen-healthcheck",
+                    "engine"
+                ],
+                "Interval": 10000000000,
+                "Timeout": 35000000000,
+                "StartPeriod": 1200000000000,
+                "Retries": 3
+            },
+            "Image": "ghcr.io/peonist-ai/halogen-flash-server:0.13.0",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": [
+                "/usr/local/bin/entrypoint.sh"
+            ],
+            "OnBuild": null,
+            "Labels": {
+                "ai.peonist.halogen.modes": "all engine api bench sweep convert inspect verify ppl niah",
+                "com.docker.compose.config-hash": "6d34cd499997313436f51634a9038fa58d4f45193ee075b8e627bd02567bacc7",
+                "com.docker.compose.container-number": "1",
+                "com.docker.compose.depends_on": "",
+                "com.docker.compose.image": "sha256:75ac54e1cb4eceea3e1b69e79b6c739cf64bc2a0ff6914d274ca0c110fbda45f",
+                "com.docker.compose.oneoff": "False",
+                "com.docker.compose.project": "halogen",
+                "com.docker.compose.project.config_files": "/srv/halogen/docker-compose.yml",
+                "com.docker.compose.project.working_dir": "/srv/halogen",
+                "com.docker.compose.replace": "ebf7d59309a3b65e203df17daf028ae72ca7bf8c3316582591a407fcc38d20ff",
+                "com.docker.compose.service": "engine",
+                "com.docker.compose.version": "2.26.1",
+                "io.buildah.version": "1.43.2",
+                "org.opencontainers.image.description": "Qwen3.8-Flash-Next inference server for AMD Strix Halo (gfx1151)",
+                "org.opencontainers.image.documentation": "https://github.com/peonist-ai/halogen-flash-server",
+                "org.opencontainers.image.licenses": "LicenseRef-Peonist-EULA",
+                "org.opencontainers.image.revision": "6d21ddee45a5",
+                "org.opencontainers.image.source": "https://github.com/peonist-ai/halogen-flash-server",
+                "org.opencontainers.image.title": "halogen-flash-server",
+                "org.opencontainers.image.vendor": "Peonist",
+                "org.opencontainers.image.version": "0.13.0"
+            }
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "4bc9598ae1a5d3581b1f8c490c6546b53c222205595acda63f128004c5ec968b",
+            "SandboxKey": "/var/run/docker/netns/4bc9598ae1a5",
+            "Ports": {
+                "8731/tcp": null
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "",
+            "Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "",
+            "IPPrefixLen": 0,
+            "IPv6Gateway": "",
+            "MacAddress": "",
+            "Networks": {
+                "halogen_default": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": [
+                        "halogen-engine",
+                        "engine"
+                    ],
+                    "MacAddress": "02:42:ac:12:00:02",
+                    "NetworkID": "f029da8a75653112b4df232fc6106f7b190604498e7996d63f6ac38e78917b9a",
+                    "EndpointID": "a4ea03360a02528dc329f808384aaf78f100a0e157735db8ce906ae69fc939a7",
+                    "Gateway": "172.18.0.1",
+                    "IPAddress": "172.18.0.2",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DriverOpts": null,
+                    "DNSNames": [
+                        "halogen-engine",
+                        "engine",
+                        "b195785be5c9"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "Id": "e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1",
+        "Created": "2026-09-21T20:21:07.414801461Z",
+        "Path": "/usr/local/bin/entrypoint.sh",
+        "Args": [
+            "api"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 4430,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-09-22T00:33:39.395659784Z",
+            "FinishedAt": "2026-09-22T00:33:37.869554516Z",
+            "Health": {
+                "Status": "healthy",
+                "FailingStreak": 0,
+                "Log": [
+                    {
+                        "Start": "2026-09-25T17:25:13.727612349-04:00",
+                        "End": "2026-09-25T17:25:14.098916661-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:24.100189311-04:00",
+                        "End": "2026-09-25T17:25:25.18331897-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:35.183616578-04:00",
+                        "End": "2026-09-25T17:25:36.295415669-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:46.2958989-04:00",
+                        "End": "2026-09-25T17:25:47.392716922-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    },
+                    {
+                        "Start": "2026-09-25T17:25:57.393300965-04:00",
+                        "End": "2026-09-25T17:25:58.459695582-04:00",
+                        "ExitCode": 0,
+                        "Output": ""
+                    }
+                ]
+            }
+        },
+        "Image": "sha256:75ac54e1cb4eceea3e1b69e79b6c739cf64bc2a0ff6914d274ca0c110fbda45f",
+        "ResolvConfPath": "/var/lib/docker/containers/e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1/hostname",
+        "HostsPath": "/var/lib/docker/containers/e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1/hosts",
+        "LogPath": "/var/lib/docker/containers/e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1/e28679e890d009f822e0e6b88d3f44aa3c184fcb1a0dfd72e9665d38b46f61e1-json.log",
+        "Name": "/halogen-api",
+        "RestartCount": 5,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/srv/halogen/models:/models:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "halogen_default",
+            "PortBindings": {
+                "8731/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "8731"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": [],
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": null,
+            "BlkioDeviceReadBps": null,
+            "BlkioDeviceWriteBps": null,
+            "BlkioDeviceReadIOps": null,
+            "BlkioDeviceWriteIOps": null,
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": null,
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/3d69885451061ffc88e62094b33d97f387cd4b5b4884b66b20a4a8ab6084326e-init/diff:/var/lib/docker/overlay2/a8682073dd4b2df37416ec9fc6c98fd5c1313ea73c6de6ea02af1e66bded5267/diff:/var/lib/docker/overlay2/9953b72d59cb256fd715231ab8aa3655268b3d6aaf8e17228770650ca3babe8e/diff:/var/lib/docker/overlay2/d218013a08e3320f623798d8340200ad606af72181e5159b3dfbfc39a1c6254f/diff:/var/lib/docker/overlay2/5a11b30dae70899284b71c9ed063081bdea50e4310707c7b09ee8c1a1731045d/diff:/var/lib/docker/overlay2/ed8388c2c77ef61e97b07b84f52b70c46206d7b1e49e601d730fb9e158ea66fc/diff:/var/lib/docker/overlay2/c0cbf24340d875f32bd49c3d9d521e30d404c54c52455446ad85a294315b7ad7/diff:/var/lib/docker/overlay2/cdff9bd4f00f2b502c5cd92cf4e9e275e03ec515b9d88f2ae6906a90e3a8b7a5/diff:/var/lib/docker/overlay2/0d60e9a38a3e81ce564ca54cd0f72f2f99a36eb7eac1d75cd838a4c0bf173cac/diff:/var/lib/docker/overlay2/966235d01666a57fc066a33d75ea3e534e17e1d9f2c755fb5926bfdf10488bb0/diff:/var/lib/docker/overlay2/272f64e5dac70116fda9dbc03206e8bf62c15b20f5fd111d7fc577daababf831/diff:/var/lib/docker/overlay2/d3286facbca72819d80d281aa094333bb9cc3b2b889bdf302c9a763658c8845c/diff:/var/lib/docker/overlay2/4ece7801454ab4c9091a70a2e589a7dcca87630d40ac226592376dc44187c119/diff:/var/lib/docker/overlay2/04d8d9796592e6d34d9dd2b7c16d46792609393549832605f632aa148347d794/diff:/var/lib/docker/overlay2/002cc24e8237da144df9633adf0f63f379a99b21c0c89d05101af87dbe55d283/diff:/var/lib/docker/overlay2/dbc82a86a597a9748d9acec7d623299d39275d18520c93b9d00ee703364a7b6f/diff:/var/lib/docker/overlay2/9207a9b5ae376ea25afabf79c59de703ccfc133f29e33b3e05d90d6ee4dd4ce5/diff:/var/lib/docker/overlay2/e25e59a8459d5c898a996e048206f06793bda7bde07f578069663e51ab46cc67/diff",
+                "MergedDir": "/var/lib/docker/overlay2/3d69885451061ffc88e62094b33d97f387cd4b5b4884b66b20a4a8ab6084326e/merged",
+                "UpperDir": "/var/lib/docker/overlay2/3d69885451061ffc88e62094b33d97f387cd4b5b4884b66b20a4a8ab6084326e/diff",
+                "WorkDir": "/var/lib/docker/overlay2/3d69885451061ffc88e62094b33d97f387cd4b5b4884b66b20a4a8ab6084326e/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/srv/halogen/models",
+                "Destination": "/models",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "e28679e890d0",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "ExposedPorts": {
+                "8731/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HALOGEN_ENGINE=engine:8730",
+                "HALOGEN_TOKENIZER=/models/tokenizer",
+                "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG=C.UTF-8",
+                "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                "PYTHON_VERSION=3.12.14",
+                "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+                "ROCM_SITE=/usr/local/lib/python3.12/site-packages",
+                "ROCM_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core",
+                "HIP_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core",
+                "HIP_DEVICE_LIB_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/amdgcn/bitcode",
+                "LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/_rocm_sdk_core/lib:/usr/local/lib/python3.12/site-packages/_rocm_sdk_libraries/lib",
+                "HALOGEN_ARCH=gfx1151",
+                "HIP_FORCE_DEV_KERNARG=1",
+                "PYTHONUNBUFFERED=1",
+                "HF_HUB_OFFLINE=1",
+                "TRANSFORMERS_VERBOSITY=error",
+                "HALOGEN_ATTN_FA=64",
+                "HALOGEN_PROMPT_CACHE=2",
+                "HALOGEN_PREFILL_CHUNK=32768",
+                "HALOGEN_KV_SLOTS=4",
+                "HALOGEN_CTX=262144",
+                "HALOGEN_MAX_TOK=32768",
+                "HALOGEN_MATMUL_ALGOS=1",
+                "HALOGEN_MATMUL_BUCKET=1",
+                "HALOGEN_MATMUL_TUNING_FILE=/opt/halogen/flash-tune.plan",
+                "HALOGEN_CHECKPOINT=/models/qwen38-flash-next-w4b.hgn",
+                "HALOGEN_PORT=8730",
+                "HALOGEN_BIND=127.0.0.1",
+                "HALOGEN_API_PORT=8731",
+                "HALOGEN_MAX_TOKENS_CAP=65536",
+                "HALOGEN_QUEUE_TIMEOUT=3600",
+                "HALOGEN_IMAGE_VERSION=0.13.0",
+                "HALOGEN_IMAGE_MODES=all engine api bench sweep convert inspect verify ppl niah"
+            ],
+            "Cmd": [
+                "api"
+            ],
+            "Healthcheck": {
+                "Test": [
+                    "CMD",
+                    "/usr/local/bin/halogen-healthcheck",
+                    "api"
+                ],
+                "Interval": 10000000000,
+                "Timeout": 35000000000,
+                "StartPeriod": 120000000000,
+                "Retries": 3
+            },
+            "Image": "ghcr.io/peonist-ai/halogen-flash-server:0.13.0",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": [
+                "/usr/local/bin/entrypoint.sh"
+            ],
+            "OnBuild": null,
+            "Labels": {
+                "ai.peonist.halogen.modes": "all engine api bench sweep convert inspect verify ppl niah",
+                "com.docker.compose.config-hash": "6066a0050f084b89275b4854a88b764211702825f0964c1d07c71c6223036b53",
+                "com.docker.compose.container-number": "1",
+                "com.docker.compose.depends_on": "engine:service_healthy:false",
+                "com.docker.compose.image": "sha256:75ac54e1cb4eceea3e1b69e79b6c739cf64bc2a0ff6914d274ca0c110fbda45f",
+                "com.docker.compose.oneoff": "False",
+                "com.docker.compose.project": "halogen",
+                "com.docker.compose.project.config_files": "/srv/halogen/docker-compose.yml",
+                "com.docker.compose.project.working_dir": "/srv/halogen",
+                "com.docker.compose.replace": "dbc38f3201d110f9ee92b48da3a92d1a23569907870452df19ff95bda41968a4",
+                "com.docker.compose.service": "api",
+                "com.docker.compose.version": "2.26.1",
+                "io.buildah.version": "1.43.2",
+                "org.opencontainers.image.description": "Qwen3.8-Flash-Next inference server for AMD Strix Halo (gfx1151)",
+                "org.opencontainers.image.documentation": "https://github.com/peonist-ai/halogen-flash-server",
+                "org.opencontainers.image.licenses": "LicenseRef-Peonist-EULA",
+                "org.opencontainers.image.revision": "6d21ddee45a5",
+                "org.opencontainers.image.source": "https://github.com/peonist-ai/halogen-flash-server",
+                "org.opencontainers.image.title": "halogen-flash-server",
+                "org.opencontainers.image.vendor": "Peonist",
+                "org.opencontainers.image.version": "0.13.0"
+            }
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "4eec3f5910e54c95c080463e18eb24cae633ffc65cbbd43ccacee94d18cc69f4",
+            "SandboxKey": "/var/run/docker/netns/4eec3f5910e5",
+            "Ports": {
+                "8731/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "8731"
+                    }
+                ]
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "",
+            "Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "",
+            "IPPrefixLen": 0,
+            "IPv6Gateway": "",
+            "MacAddress": "",
+            "Networks": {
+                "halogen_default": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": [
+                        "halogen-api",
+                        "api"
+                    ],
+                    "MacAddress": "02:42:ac:12:00:03",
+                    "NetworkID": "f029da8a75653112b4df232fc6106f7b190604498e7996d63f6ac38e78917b9a",
+                    "EndpointID": "46a7ce8421653f24c399a571586fb7b009c91ffe42af0fb0805e9fb6ee21f3d5",
+                    "Gateway": "172.18.0.1",
+                    "IPAddress": "172.18.0.3",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DriverOpts": null,
+                    "DNSNames": [
+                        "halogen-api",
+                        "api",
+                        "e28679e890d0"
+                    ]
+                }
+            }
+        }
+    }
+]

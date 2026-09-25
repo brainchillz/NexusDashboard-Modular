@@ -39,6 +39,8 @@ EXPECTED_NAV = [
         # PAGE of the llamacpp module rather than a module of its own, so it
         # carries module='llamacpp' and is hidden by that toggle.
         ('models', 'Models', 'dl', 'llamacpp', False),
+        # 3.5.0: the halogen-flash-server compose stack (default-off module).
+        ('halogen', 'Halogen', 'mon', 'halogen', False),
         ('gpu', 'GPU', 'cpu', 'gpu', False)]),
     ('lxd', 'LXD / Incus', [
         ('instances', 'Instances', 'mon', 'instances', False),

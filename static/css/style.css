@@ -558,3 +558,10 @@ textarea.form-control {
 .btn.sso-btn { width: 100%; background: transparent; color: var(--text);
   border: 1px solid var(--border); }
 .btn.sso-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+/* ─── Stat tiles (halogen throughput; reusable) ───────────────────── */
+.stat-row { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 8px 0 4px; }
+.stat { min-width: 96px; }
+.stat-v { font-size: 1.45em; font-weight: 600; line-height: 1.2; }
+.stat-l { font-size: .78em; color: var(--muted, #888); }
+table.kv td:first-child { color: var(--muted, #888); white-space: nowrap; width: 1%; padding-right: 16px; }

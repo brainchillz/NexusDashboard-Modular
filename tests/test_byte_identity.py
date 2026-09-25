@@ -88,6 +88,12 @@ def client(monkeypatch, tmp_path):
                         lambda: {'golden': 'nut'})
     monkeypatch.setitem(app._DESCRIPTORS['upsmon'], 'summary',
                         lambda: {'golden': 'upsmon'})
+    # halogen talks to the Docker socket (not `run`), so its hooks would hit
+    # the real daemon on the box running the suite — stub all three.
+    monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'summary',
+                        lambda: {'golden': 'halogen'})
+    monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'alerts', lambda: [])
+    monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'metrics', lambda: [])
     # The updates summary block reports a live stat of /run/reboot-required —
     # pin it so the golden never depends on whether the box running the suite
     # happens to be pending a reboot.
