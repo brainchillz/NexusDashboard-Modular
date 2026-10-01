@@ -54,14 +54,22 @@ async function dkRenderTab() {
 let dkUpdateState = null;      // last /api/docker/updates result, keyed by container id
 function dkUpdateNote() {
   if (!dkUpdateState) return '';
-  const n = dkUpdateState.updates;
-  return n ? `${n} image${n === 1 ? '' : 's'} with a newer tag at the registry` : 'all images current (as of ' + new Date(dkUpdateState.checked_at * 1000).toLocaleTimeString() + ')';
+  const n = dkUpdateState.updates, k = dkUpdateState.recreate || 0;
+  const parts = [];
+  if (n) parts.push(`${n} image${n === 1 ? '' : 's'} with a newer tag at the registry`);
+  if (k) parts.push(`${k} container${k === 1 ? '' : 's'} to recreate onto an image already here`);
+  return parts.join(', ') || 'all images current (as of ' + new Date(dkUpdateState.checked_at * 1000).toLocaleTimeString() + ')';
 }
 function dkUpdateBadge(c) {
   const r = dkUpdateState && dkUpdateState.byId[c.id];
   if (!r) return '';
   if (r.status === 'update') return `<span class="status-badge yellow" title="${escapeHtml(r.detail)}">update available</span>`
-    + (currentRole === 'admin' ? ` <button class="btn btn-sm btn-outline" onclick="dkPullFor('${jsArg(c.image)}')" title="docker pull — then restart or recreate the container">Pull</button>` : '');
+    + (currentRole === 'admin' ? ` <button class="btn btn-sm btn-outline" onclick="dkPullFor('${jsArg(r.image || c.image)}')" title="docker pull — then recreate the container (a restart keeps the old image)">Pull</button>` : '');
+  if (r.status === 'recreate') {
+    const how = c.compose_project ? ` Compose Stacks > ${c.compose_project} > Up recreates it.` : '';
+    return `<span class="status-badge yellow" title="${escapeHtml(r.detail + how)}">${r.origin === 'built' ? 'rebuilt' : 'pulled'} — recreate to apply</span>`
+      + (currentRole === 'admin' ? ` <button class="btn btn-sm btn-outline" onclick="dkRecreate('${jsArg(c.id)}','${jsArg(c.name)}','${r.via === 'compose' ? 'compose' : 'clone'}')" title="Replace this container with one from the new image">Recreate</button>` : '');
+  }
   if (r.status === 'current') return '<span class="status-badge green" title="up to date">current</span>';
   if (r.status === 'pinned') return '<span class="status-badge gray" title="pinned to a digest">pinned</span>';
   if (r.status === 'local') return '<span class="status-badge gray" title="locally built or loaded — no registry to compare">local build</span>';
@@ -74,7 +82,7 @@ async function dkCheckUpdates() {
     const r = await API.get('/api/docker/updates?refresh=1');
     const byId = {};
     for (const row of r.containers || []) byId[row.id] = row;
-    dkUpdateState = { updates: r.updates, checked_at: r.checked_at, byId };
+    dkUpdateState = { updates: r.updates, recreate: r.recreate, checked_at: r.checked_at, byId };
     dkSwitchTab('containers');
   } catch (e) { if (note) note.textContent = e.message; else alert(e.message); }
 }
@@ -82,11 +90,34 @@ async function dkPullFor(ref) {
   const note = $('dk-updates-note');
   if (note) note.textContent = `pulling ${ref}…`;
   try {
-    await API.post('/api/docker/images/pull', { ref });
-    dkUpdateState = null;
-    if (note) note.textContent = `${ref} pulled — restart or recreate the container to run it`;
-    dkSwitchTab('containers');
-  } catch (e) { alert(e.message); }
+    await API.post('/api/docker/images/pull', { reference: ref });
+  } catch (e) { if (note) note.textContent = dkUpdateNote(); alert(e.message); return; }
+  // Re-check: the badge becomes "pulled — recreate to apply" (the tag moved,
+  // the container still runs the old image until it is recreated).
+  await dkCheckUpdates();
+}
+// Replace a container with one from the image its tag now points at. `via`
+// is how the node will do it (from the update row), `method` forces one.
+async function dkRecreate(id, name, via, method) {
+  const how = via === 'compose' && method !== 'clone'
+    ? 'Docker Compose replaces it from the stack\'s own file (docker compose up -d for this one service).'
+    : 'It is stopped and replaced by a new container with the same settings — ports, volumes, networks, environment, restart policy. If the new one does not stay up, the old one is put back.';
+  if (!method && !confirm(`Recreate ${name} from its new image?\n\n${how}\n\nExpect a few seconds of downtime. Data in volumes and bind mounts is kept; anything written only inside the container is lost.`)) return;
+  const note = $('dk-updates-note');
+  if (note) note.textContent = `recreating ${name}…`;
+  try {
+    const r = await API.post(`/api/docker/containers/${encodeURIComponent(id)}/recreate`, method ? { method } : {});
+    if (r.warning) alert(r.warning);
+  } catch (e) {
+    if (note) note.textContent = dkUpdateNote();
+    if (via === 'compose' && !method
+        && confirm(`Docker Compose could not recreate ${name}:\n\n${e.message}\n\nRecreate it directly from the container's own settings instead?`)) {
+      return dkRecreate(id, name, via, 'clone');
+    }
+    alert(e.message);
+    return;
+  }
+  await dkCheckUpdates();
 }
 
 // ─── Containers ─────────────────────────────────────────

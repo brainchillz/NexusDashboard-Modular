@@ -17,7 +17,7 @@ import shlex
 import urllib.parse
 from flask import Blueprint, jsonify, request
 
-from ..core.runcmd import err
+from ..core.runcmd import run, err
 from . import docker_registry as reg
 import time
 import threading
@@ -235,10 +235,19 @@ def dk_containers_list():
     return jsonify([_dk_container_summary(c) for c in cts])
 
 
+def _dk_pull_ref(ref):
+    """The reference to hand the Engine API. A name-only `fromImage` makes
+    the daemon pull EVERY tag of the repository — `docker pull` adds
+    `:latest` client-side, the API does not — so do the same here."""
+    if '@' in ref or ':' in ref.rsplit('/', 1)[-1]:
+        return ref
+    return ref + ':latest'
+
+
 def _dk_pull(ref, timeout=600):
     """Pull an image; raises DockerError on failure (including mid-stream
     NDJSON errors, which arrive with HTTP 200)."""
-    q = urllib.parse.urlencode({'fromImage': ref})
+    q = urllib.parse.urlencode({'fromImage': _dk_pull_ref(ref)})
     status, raw = docker_raw('POST', '/images/create?%s' % q, timeout=timeout)
     last_error = None
     for line in raw.splitlines():
@@ -459,6 +468,201 @@ def dk_container_action(cid):
     return jsonify({'success': True})
 
 
+# ─── Recreate ─────────────────────────────────────────────────────────
+# A container is bound to the image it was created from: pulling moves the
+# tag, a restart starts the same old image again. Applying a pulled image
+# means REPLACING the container. Two ways, picked per container:
+#   compose — `docker compose up -d --no-deps <service>` when the container
+#             carries compose labels AND the service user can read every
+#             compose file (compose owns the definition; it is the authority).
+#   clone   — everything else, including compose stacks whose files this
+#             user cannot read: a new container from the old one's own
+#             inspect data, old one parked under another name until the new
+#             one is seen running, put back if it is not.
+DK_RECREATE_METHODS = {'auto', 'compose', 'clone'}
+DK_RECREATE_SETTLE_S = 3       # how long the replacement must stay up
+# Config keys a container merely INHERITS from its image when it does not
+# set them. Sent back verbatim they would pin the OLD image's entrypoint /
+# command / healthcheck onto the new one.
+_DK_INHERITED = ('Cmd', 'Entrypoint', 'WorkingDir', 'User', 'StopSignal', 'Healthcheck', 'Shell')
+_DK_COMPOSE_LBL = 'com.docker.compose.'
+
+
+def _dk_compose_target(labels):
+    """(stack, service) when `docker compose` can recreate this container as
+    the service user, else None. `stack` is the dict _compose_args takes."""
+    labels = labels or {}
+    project = labels.get(_DK_COMPOSE_LBL + 'project') or ''
+    service = labels.get(_DK_COMPOSE_LBL + 'service') or ''
+    wd = labels.get(_DK_COMPOSE_LBL + 'project.working_dir') or ''
+    files = [f for f in (labels.get(_DK_COMPOSE_LBL + 'project.config_files') or '').split(',') if f]
+    if not (re.match(r'^[a-z0-9][a-z0-9_-]{0,62}\Z', project) and RE_DK_NAME.match(service)):
+        return None
+    if not (wd and os.path.isdir(wd) and files and all(os.access(f, os.R_OK) for f in files)):
+        return None
+    return {'name': project, 'working_dir': wd, 'config_files': files}, service
+
+
+def _dk_recreate_body(info, old_image):
+    """(create-body, extra-networks) for a replacement of the inspected
+    container `info`. `old_image` is the inspect of the image it runs now —
+    what it shares with that image is inheritance, not configuration, and is
+    left out so the NEW image supplies it."""
+    cfg = dict(info.get('Config') or {})
+    host = dict(info.get('HostConfig') or {})
+    icfg = old_image.get('Config') or {}
+    for k in _DK_INHERITED:
+        if cfg.get(k) == icfg.get(k):
+            cfg.pop(k, None)
+    inherited_env = set(icfg.get('Env') or [])
+    cfg['Env'] = [e for e in cfg.get('Env') or [] if e not in inherited_env]
+    ilabels = icfg.get('Labels') or {}
+    cfg['Labels'] = {k: v for k, v in (cfg.get('Labels') or {}).items() if ilabels.get(k) != v}
+    cfg.pop('MacAddress', None)                 # generated per endpoint; the top-level field is deprecated
+    short = (info.get('Id') or '')[:12]
+    if cfg.get('Hostname') == short:            # the default hostname IS the old id
+        cfg.pop('Hostname', None)
+    mode = host.get('NetworkMode') or ''
+    if mode.startswith('container:'):           # shares another container's stack: these conflict
+        for k in ('Hostname', 'Domainname', 'ExposedPorts'):
+            cfg.pop(k, None)
+        host['PortBindings'] = {}
+    # Anonymous volumes (an image VOLUME nobody named) are not in Binds — a
+    # replacement would get fresh empty ones. Carry them over by name.
+    binds = list(host.get('Binds') or [])
+    taken = {b.split(':')[1] for b in binds if b.count(':') >= 1}
+    taken |= {m.get('Target') for m in host.get('Mounts') or []}
+    for m in info.get('Mounts') or []:
+        if m.get('Type') == 'volume' and m.get('Name') and m.get('Destination') not in taken:
+            binds.append('%s:%s%s' % (m['Name'], m['Destination'], '' if m.get('RW', True) else ':ro'))
+    host['Binds'] = binds
+    endpoints = {}
+    if mode not in ('host', 'none') and not mode.startswith('container:'):
+        for name, n in ((info.get('NetworkSettings') or {}).get('Networks') or {}).items():
+            n = n or {}
+            ep = {k: n[k] for k in ('IPAMConfig', 'Links', 'DriverOpts') if n.get(k)}
+            aliases = [a for a in n.get('Aliases') or [] if a != short]
+            if aliases:
+                ep['Aliases'] = aliases
+            endpoints[name] = ep
+    # One network at create (every API version takes that), the rest connected
+    # before start.
+    primary = mode if mode in endpoints else next(iter(endpoints), None)
+    body = cfg
+    body['HostConfig'] = host
+    if primary:
+        body['NetworkingConfig'] = {'EndpointsConfig': {primary: endpoints.pop(primary)}}
+    return body, sorted(endpoints.items())
+
+
+def _dk_recreate_clone(info, ref):
+    """Replace the container with one created from `ref` and the old one's
+    own settings. Returns (new_id, warning). The old container is renamed
+    out of the way, not removed, until the new one has stayed up — any
+    failure puts it back and raises."""
+    old_id = info.get('Id') or ''
+    name = (info.get('Name') or '').lstrip('/')
+    was_running = bool((info.get('State') or {}).get('Running'))
+    old_image = docker_request('GET', '/images/%s/json' % urllib.parse.quote(info.get('Image') or '', safe=''))
+    body, extra_nets = _dk_recreate_body(info, old_image)
+    body['Image'] = ref
+    parked = '%s-replaced-%d' % (name[:100], int(time.time()))
+    if was_running:
+        docker_request('POST', '/containers/%s/stop?t=10' % old_id, timeout=90)
+    new_id = None
+
+    def put_back(why):
+        try:
+            if new_id:
+                docker_request('DELETE', '/containers/%s?force=1' % new_id, timeout=60)
+            docker_request('POST', '/containers/%s/rename?%s' % (old_id, urllib.parse.urlencode({'name': name})))
+            if was_running:
+                docker_request('POST', '/containers/%s/start' % old_id, timeout=90)
+        except DockerError as e2:
+            return DockerError(500, '%s — and putting the previous container back FAILED (%s). It is %s; '
+                                    'look at it by hand.' % (why, e2.message, old_id[:12]))
+        return DockerError(500, '%s — the previous container was put back%s.'
+                           % (why, ' and is running again' if was_running else ''))
+
+    try:
+        docker_request('POST', '/containers/%s/rename?%s' % (old_id, urllib.parse.urlencode({'name': parked})))
+    except DockerError as e:
+        if was_running:
+            docker_request('POST', '/containers/%s/start' % old_id, timeout=90)
+        raise DockerError(e.status, 'Could not move the old container aside: %s' % e.message)
+    try:
+        created = docker_request('POST', '/containers/create?%s' % urllib.parse.urlencode({'name': name}), body=body)
+        new_id = created.get('Id') or ''
+        for net, ep in extra_nets:
+            docker_request('POST', '/networks/%s/connect' % urllib.parse.quote(net, safe=''),
+                           body={'Container': new_id, 'EndpointConfig': ep})
+        if was_running:
+            docker_request('POST', '/containers/%s/start' % new_id, timeout=90)
+    except DockerError as e:
+        raise put_back('The replacement could not be created or started: %s' % e.message)
+    if was_running:
+        time.sleep(DK_RECREATE_SETTLE_S)
+        try:
+            st = docker_request('GET', '/containers/%s/json' % new_id).get('State') or {}
+        except DockerError as e:
+            raise put_back('The replacement could not be inspected: %s' % e.message)
+        if not st.get('Running') or st.get('Restarting'):
+            tail = ''
+            try:
+                _, raw = docker_raw('GET', '/containers/%s/logs?stdout=1&stderr=1&tail=15' % new_id)
+                tail = _dk_demux_logs(raw).decode('utf-8', 'replace').strip()[-1500:]
+            except DockerError:
+                pass
+            raise put_back('The replacement did not stay up (exit code %s)%s'
+                           % (st.get('ExitCode'), ': ' + tail if tail else ''))
+    warning = None
+    try:
+        # No v=1: named AND anonymous volumes stay — the new container uses them.
+        docker_request('DELETE', '/containers/%s' % old_id, timeout=60)
+    except DockerError as e:
+        warning = 'Recreated, but the previous container could not be removed (%s) — it is kept as %s.' % (e.message, parked)
+    return new_id[:12], warning
+
+
+@bp.route('/api/docker/containers/<cid>/recreate', methods=['POST'])
+def dk_container_recreate(cid):
+    if not RE_DK_NAME.match(cid):
+        return err('Invalid container id')
+    method = (request.get_json() or {}).get('method') or 'auto'
+    if method not in DK_RECREATE_METHODS:
+        return err('method must be one of: %s' % ', '.join(sorted(DK_RECREATE_METHODS)))
+    try:
+        info = docker_request('GET', '/containers/%s/json' % cid)
+        cfg = info.get('Config') or {}
+        ref = (cfg.get('Image') or '').strip()
+        if not RE_DK_IMAGE.match(ref) or ref.startswith('sha256:'):
+            return err('This container was created from an image id, not a tag — there is nothing newer to move it to')
+        try:
+            target = docker_request('GET', '/images/%s/json' % urllib.parse.quote(ref, safe=''))
+        except DockerError as e:
+            if e.status == 404:
+                return err('%s is not on this host — pull it first' % ref)
+            raise
+        if target.get('Id') == info.get('Image'):
+            return err('This container already runs the image %s points at — nothing to apply' % ref)
+        compose = _dk_compose_target(cfg.get('Labels'))
+        if method == 'compose' and not compose:
+            return err('Not a compose service whose files the dashboard user can read')
+        if compose and method != 'clone':
+            from . import docker_compose as dc          # imports this module: must stay local
+            stack, service = compose
+            out, errout, rc = run(dc._compose_args(stack, ['up', '-d', '--no-deps', service]),
+                                  no_sudo=True, timeout=600)
+            if rc != 0:
+                return err((errout or out).strip()[-2000:] or 'docker compose up failed', 500)
+            return jsonify({'success': True, 'method': 'compose',
+                            'detail': (errout or out).strip()[-2000:]})
+        new_id, warning = _dk_recreate_clone(info, ref)
+    except DockerError as e:
+        return _dk_error_response(e)
+    return jsonify({'success': True, 'method': 'clone', 'id': new_id, 'warning': warning})
+
+
 @bp.route('/api/docker/containers/<cid>/delete', methods=['POST'])
 def dk_container_delete(cid):
     if not RE_DK_NAME.match(cid):
@@ -529,9 +733,27 @@ def _remote_digest_cached(ref, refresh=False):
     return d, e, False
 
 
+def _moved_tag_ref(c):
+    """The tag a container was created from, when its list entry names the
+    image by ID. Pulling (or rebuilding) a tag moves it to the new image and
+    leaves the one a running container holds untagged, so the list shows a
+    bare sha256 — the container's own config still carries the tag. None
+    when it cannot be read or the container really was created from an id."""
+    if not (c.get('Image') or '').startswith('sha256:'):
+        return None
+    try:
+        info = docker_request('GET', '/containers/%s/json' % (c.get('Id') or '')[:12], timeout=10)
+    except DockerError:
+        return None
+    ref = ((info.get('Config') or {}).get('Image') or '').strip()
+    return ref if RE_DK_IMAGE.match(ref) and not ref.startswith('sha256:') else None
+
+
 def _image_update_rows(containers, refresh=False):
     """Per-container rows; registry lookups run in parallel (stdlib pool)."""
-    refs = sorted({c.get('Image') for c in containers if c.get('Image') and not c.get('Image', '').startswith('sha256:')})
+    moved = {c.get('Id'): t for c in containers for t in [_moved_tag_ref(c)] if t}
+    refs = sorted({c.get('Image') for c in containers if c.get('Image') and not c.get('Image', '').startswith('sha256:')}
+                  | set(moved.values()))
     local = {}
     for ref in refs:
         try:
@@ -547,15 +769,22 @@ def _image_update_rows(containers, refresh=False):
         remote.update(dict(zip(ask, pool.map(lambda r: _remote_digest_cached(r, refresh), ask))))
     rows = []
     for c in containers:
-        ref = c.get('Image') or ''
+        tagref = moved.get(c.get('Id'))
+        ref = tagref or c.get('Image') or ''
         row = {'id': (c.get('Id') or '')[:12], 'name': (c.get('Names') or ['/?'])[0].lstrip('/'),
                'image': ref, 'state': c.get('State'), 'status': 'unknown', 'detail': ''}
-        if ref.startswith('sha256:') or ref not in remote:
-            row['detail'] = 'image referenced by id, not a tag'
+        li = local.get(ref) or {}
+        # A short id in the container's config resolves to the very image it
+        # runs: created from an id after all, no tag to follow.
+        if ref.startswith('sha256:') or ref not in remote or (tagref and li.get('Id') == c.get('ImageID')):
+            row.update({'image': c.get('Image') or '', 'detail': 'image referenced by id, not a tag'})
+            rows.append(row)
+            continue
+        if tagref and '_error' in li:
+            row['detail'] = 'created from %s, which is no longer on this host' % tagref
             rows.append(row)
             continue
         host, repo, tag, digest = reg.parse_ref(ref)
-        li = local.get(ref) or {}
         rd, err_, cached = remote[ref]
         row.update({'registry': host, 'tag': tag, 'cached': cached})
         if digest:
@@ -572,6 +801,15 @@ def _image_update_rows(containers, refresh=False):
             row['remote_digest'] = rd[:19] if rd else None
             row['detail'] = ('the %s tag has moved at %s — pull and recreate' % (tag, host) if st == 'update'
                              else 'up to date' if st == 'current' else 'locally built or loaded image — nothing to compare')
+        # The tag is on this host as a DIFFERENT image than the one running.
+        # True whatever the registry said, so only a pending pull outranks it.
+        if tagref and row['status'] != 'update':
+            origin = 'pulled' if li.get('RepoDigests') else 'built'
+            row.update({'status': 'recreate', 'origin': origin,
+                        'via': 'compose' if _dk_compose_target(c.get('Labels')) else 'clone',
+                        'detail': '%s was %s after this container was created — recreate the container '
+                                  'to run the new image (a restart keeps the old one)'
+                                  % (ref, 'pulled' if origin == 'pulled' else 'rebuilt')})
         rows.append(row)
     return rows
 
@@ -586,6 +824,7 @@ def dk_image_updates():
     rows = _image_update_rows(cts, refresh)
     return jsonify({'containers': rows,
                     'updates': sum(1 for r in rows if r['status'] == 'update'),
+                    'recreate': sum(1 for r in rows if r['status'] == 'recreate'),
                     'checked_at': int(time.time())})
 
 
