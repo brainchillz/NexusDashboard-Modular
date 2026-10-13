@@ -348,13 +348,25 @@ async function page_nfs() {
   ]);
   nfsExports = exports;
   let rows = exports.map(ex => {
-    const clientStr = (ex.clients || []).map(c => `${c.host}(${c.options})`).join(', ');
+    if (ex.error) {
+      return `<tr><td colspan="3"><span class="status-badge yellow">${escapeHtml(ex.source)}</span>
+        ${escapeHtml(ex.error)} — its exports are served but cannot be listed here</td></tr>`;
+    }
+    const clientStr = (ex.clients || []).map(c => c.options ? `${c.host}(${c.options})` : c.host).join(', ');
+    // A line in /etc/exports.d/<file>.exports belongs to whatever wrote it
+    // (Houston, `zfs set sharenfs`, a hand-written drop-in); the dashboard
+    // lists it but only edits /etc/exports.
+    const foreign = !ex.editable;
+    const src = foreign ? ` <span class="status-badge gray" title="${escapeHtml(ex.source)}">${escapeHtml(ex.source.replace(/^\/etc\//, ''))}</span>` : '';
+    const defaults = ex.defaults ? `<span class="mono" title="default options for every client, kept as-is on edit">-${escapeHtml(ex.defaults)}</span> ` : '';
+    const comment = ex.comment ? ` <span style="color:var(--text-muted)"># ${escapeHtml(ex.comment)}</span>` : '';
+    const dis = foreign ? ` disabled title="managed in ${escapeHtml(ex.source)} — edit that file, or move the line into /etc/exports"` : '';
     return `<tr>
-      <td>${escapeHtml(ex.path)}</td>
-      <td>${escapeHtml(clientStr)}</td>
+      <td>${escapeHtml(ex.path)}${src}</td>
+      <td>${defaults}${escapeHtml(clientStr)}${comment}</td>
       <td>
-        <button class="btn btn-sm" onclick="nfsEditExport('${jsArg(ex.path)}')">Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="nfsDeleteExport('${jsArg(ex.path)}')">Remove</button>
+        <button class="btn btn-sm" onclick="nfsEditExport('${jsArg(ex.path)}')"${dis}>Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="nfsDeleteExport('${jsArg(ex.path)}')"${dis}>Remove</button>
       </td>
     </tr>`;
   }).join('');
@@ -396,6 +408,9 @@ function nfsExportModal(existing) {
     <div class="form-group"><label>Path to export</label>
       <input id="nf-path" class="form-control" placeholder="/srv/nfs/share"
         value="${escapeHtml(existing ? existing.path : '')}" ${isEdit ? 'readonly' : ''}></div>
+    ${existing && existing.defaults ? `<div class="form-group"><label>Default options (kept as-is)</label>
+      <input class="form-control mono" value="-${escapeHtml(existing.defaults)}" readonly>
+      <p class="help">Applies to every client below; an <code>fsid=</code> must not change or mounted clients get ESTALE.</p></div>` : ''}
     <label>Clients <button class="btn btn-sm" onclick="nfsAddClientRow('','${NFS_DEFAULT_OPTS}')">+ Add client</button></label>
     <div id="nf-clients" style="margin:8px 0">${clients.map(c => nfsClientRowHtml(c.host, c.options)).join('')}</div>
     <p class="help">One row per client/network. Common options:
