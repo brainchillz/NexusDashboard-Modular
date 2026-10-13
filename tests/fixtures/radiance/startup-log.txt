@@ -1,0 +1,84 @@
+  OK    mxfp4: register the radiance W4A8 kernel
+  OK    mxfp4: relax aiter's CDNA4 gate
+  OK    mxfp4: aiter moved-module + fp4 arch allowlist
+  OK    nvfp4: NVFP4 branch -> radiance requant scheme
+  OK    nvfp4: unmatched bf16 linears -> optional radiance requant scheme
+  OK    nvfp4: FP8 branch -> optional radiance requant scheme
+  OK    tp3pad: ModelConfig hook (maybe_pad_config)
+  OK    tp3pad: DefaultModelLoader hook (pad_weights)
+  OK    tp3pad: VocabParallelEmbedding hook (vocab_pad_multiple)
+  OK    all-reduce: RADIANCE_AR_MAX_KB / _QUANT_MIN_KB knobs
+  OK    top-k/top-p: Triton min-rows constant
+  OK    top-k/top-p: route <8 rows to Triton
+...
+(APIServer pid=1) INFO 10-09 01:53:40 [api_utils.py:345]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=1) INFO 10-09 01:53:40 [api_utils.py:345] 
+(APIServer pid=1) INFO 10-09 01:53:40 [api_utils.py:273] non-default args: {'model_tag': '/models/Qwen3.8-27B-Uncensored-NVFP4', 'chat_template': '/patches/qwen-fixed-v22.3.jinja', 'enable_auto_tool_choice': True, 'tool_call_parser': 'qwen3_coder', 'host': '0.0.0.0', 'port': 8080, 'model': '/models/Qwen3.8-27B-Uncensored-NVFP4', 'max_model_len': 65536, 'served_model_name': ['Qwen3.8', 'Qwen3.6', 'Qwen3.8-Uncensored', 'Qwen3.8-27B'], 'override_generation_config': {'temperature': 0.7, 'top_p': 0.95, 'top_k': 20}, 'attention_backend': 'R4D', 'reasoning_parser': 'qwen3', 'gpu_memory_utilization': 0.97, 'kv_cache_memory_bytes': 6539000000, 'kv_cache_dtype': 'fp8', 'enable_prefix_caching': True, 'mamba_cache_dtype': 'bfloat16', 'mamba_ssm_cache_dtype': 'float16', 'mamba_cache_mode': 'align', 'max_num_batched_tokens': 2560, 'max_num_seqs': 3, 'async_scheduling': False, 'speculative_config': {'method': 'dflash', 'model': '/models/Qwen3.8-27B-DFlash2-FP8', 'num_speculative_tokens': 7, 'attention_backend': 'TRITON_ATTN', 'disable_padded_drafter_batch': True, 'draft_sample_method': 'greedy'}, 'compilation_config': {'mode': None, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': [], 'ir_enable_torch_wrap': None, 'splitting_ops': None, 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': None, 'compile_ranges_endpoints': None, 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': None, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': None, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True}, 'max_cudagraph_capture_size': None, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': None, 'static_all_moe_layers': []}}
+(APIServer pid=1) INFO 10-09 01:53:40 [model.py:656] Resolved architecture: Qwen3_5ForConditionalGeneration
+(APIServer pid=1) INFO 10-09 01:53:40 [model.py:1894] Using max model len 65536
+(EngineCore pid=531) INFO 10-09 01:54:05 [core.py:121] Initializing a V1 LLM engine (v0.27.1) with config: model='/models/Qwen3.8-27B-Uncensored-NVFP4', speculative_config=SpeculativeConfig(method='dflash', model='/models/Qwen3.8-27B-DFlash2-FP8', num_spec_tokens=7), tokenizer='/models/Qwen3.8-27B-Uncensored-NVFP4', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=65536, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=compressed-tensors, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=fp8, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='qwen3', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=Qwen3.8, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'none'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [2560], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_mla_dual_rms_norm': True, 'fuse_rope_kvcache': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 24, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, enable_bf16x3_router_gemm=False, moe_backend='auto', linear_backend='auto')
+(EngineCore pid=531) INFO 10-09 01:54:06 [parallel_state.py:1640] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.10.73:45673 backend=nccl
+(EngineCore pid=531) INFO 10-09 01:54:06 [parallel_state.py:1977] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=531) INFO 10-09 01:54:16 [default_loader.py:441] Loading weights took 8.25 seconds
+(EngineCore pid=531) INFO 10-09 01:54:38 [default_loader.py:441] Loading weights took 0.72 seconds
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Using uncalibrated q_scale Parameter containing:
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Parameter(KVCacheScaleParameter(0.0520, device='cuda:0')) and/or prob_scale 1.0 with fp8 attention. This may cause accuracy issues. Please make sure q/prob scaling factors are available in the fp8 checkpoint.
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Using uncalibrated q_scale Parameter containing:
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Parameter(KVCacheScaleParameter(0.0635, device='cuda:0')) and/or prob_scale 1.0 with fp8 attention. This may cause accuracy issues. Please make sure q/prob scaling factors are available in the fp8 checkpoint.
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Using uncalibrated q_scale Parameter containing:
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Parameter(KVCacheScaleParameter(0.0623, device='cuda:0')) and/or prob_scale 1.0 with fp8 attention. This may cause accuracy issues. Please make sure q/prob scaling factors are available in the fp8 checkpoint.
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Using uncalibrated q_scale Parameter containing:
+(EngineCore pid=531) WARNING 10-09 01:54:38 [kv_cache.py:190] Parameter(KVCacheScaleParameter(0.0554, device='cuda:0')) and/or prob_scale 1.0 with fp8 attention. This may cause accuracy issues. Please make sure q/prob scaling factors are available in the fp8 checkpoint.
+(EngineCore pid=531) INFO 10-09 01:54:39 [model_runner.py:332] Model loading took 19.95 GiB and 32.431876 seconds
+(EngineCore pid=531) INFO 10-09 01:54:39 [interface.py:911] Setting attention block size to 880 tokens to ensure that attention page size is >= mamba page size.
+(EngineCore pid=531) INFO 10-09 01:54:39 [interface.py:935] Padding mamba page size by 1.38% to ensure that mamba page size and attention page size are exactly equal.
+(EngineCore pid=531) [transformers] The `use_fast` parameter is deprecated and will be removed in a future version. Use `backend="torchvision"` instead of `use_fast=True`, or `backend="pil"` instead of `use_fast=False`.
+(EngineCore pid=531) INFO 10-09 01:54:45 [encoder_runner.py:80] Encoder cache will be initialized with a budget of 16384 tokens, and profiled with 1 image items of the maximum feature size.
+(EngineCore pid=531) INFO 10-09 01:55:01 [gpu_worker.py:491] Initial free memory 31.64 GiB, reserved 6.09 GiB memory for KV Cache as specified by kv_cache_memory_bytes config and skipped memory profiling. This does not respect the gpu_memory_utilization config. Only use kv_cache_memory_bytes config when you want manual control of KV cache memory size. If OOM'ed, check the difference of initial free memory between the current run and the previous run where kv_cache_memory_bytes is suggested and update it correspondingly.
+(EngineCore pid=531) INFO 10-09 01:55:01 [kv_cache_utils.py:1182] [radiance] kv cache groups: size 8, 9 groups, 211 blocks/request (upstream would pick size 5)
+(EngineCore pid=531) WARNING 10-09 01:55:01 [kv_cache_utils.py:1322] Add 3 padding layers, may waste at most 60.00% KV cache memory
+(EngineCore pid=531) INFO 10-09 01:55:01 [kv_cache_utils.py:2296] GPU KV cache size: 140,700 tokens
+(EngineCore pid=531) INFO 10-09 01:55:01 [kv_cache_utils.py:2297] Maximum concurrency for 65,536 tokens per request: 2.15x
+(EngineCore pid=531) [radiance] R4D attention: 24 q heads / 4 kv heads, head_dim 256, block 16, attn_prefill_h256_gqa6_fp8kv + attn_decode_h256_gqa6_fp8kv, 5.7 MiB split-KV scratch
+(EngineCore pid=531) [radiance] R4D attention: 24 q heads / 4 kv heads, head_dim 256, block 16, attn_prefill_h256_gqa6_fp8kv + attn_decode_h256_gqa6_fp8kv, 5.7 MiB split-KV scratch
+(EngineCore pid=531) INFO 10-09 01:55:03 [model_runner.py:794] Graph capturing finished in 2 secs, took 1.08 GiB
+(EngineCore pid=531) [radiance.gdn] all-R4D prefill+spec path live
+(EngineCore pid=531) INFO 10-09 01:55:04 [jit_monitor.py:79] Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+(EngineCore pid=531) [radiance]   attn_decode_paged     kv_dtype=fp8_e4m3 q_len=1 head_dim=256 gqa=6 block_size=16 causal=1 q_dtype=bf16
+(EngineCore pid=531) [radiance]                         -> attn_decode_h256_gqa6_fp8kv
+(EngineCore pid=531) [radiance]   attn_decode_paged     kv_dtype=bf16 q_len=1 head_dim=256 gqa=6 block_size=16 causal=1 q_dtype=bf16
+(EngineCore pid=531) [radiance]                         -> attn_decode_h256_gqa6_bf16kv
+(EngineCore pid=531) INFO 10-09 01:55:04 [core.py:348] init engine (profile, create kv cache, warmup model) took 25.32 s (compilation: 6.37 s)
+(EngineCore pid=531) INFO 10-09 01:55:04 [kernel.py:306] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+(APIServer pid=1) INFO 10-09 01:55:04 [api_server.py:678] Supported tasks: ['generate']
+(APIServer pid=1) INFO 10-09 01:55:04 [parser_manager.py:37] "auto" tool choice has been enabled.
+(APIServer pid=1) INFO 10-09 01:55:05 [hf.py:540] Detected the chat template content format to be 'openai'. You can set `--chat-template-content-format` to override this.
+(APIServer pid=1) INFO 10-09 01:55:19 [base.py:235] Multi-modal warmup completed in 14.631s
+(APIServer pid=1) INFO 10-09 01:55:21 [base.py:235] Readonly multi-modal warmup completed in 1.602s
+(APIServer pid=1) WARNING 10-09 01:55:21 [model.py:1648] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.7, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+(APIServer pid=1) INFO 10-09 01:55:21 [api_server.py:682] Starting vLLM server on http://0.0.0.0:8080
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:37] Available routes are:
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /openapi.json, Methods: HEAD, GET
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /docs, Methods: HEAD, GET
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: HEAD, GET
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /v1/chat/completions/derender, Methods: POST
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /v1/completions/derender, Methods: POST
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:99] API server: waiting for HTTP server to start
+(APIServer pid=1) INFO:     Started server process [1]
+(APIServer pid=1) INFO:     Waiting for application startup.
+(APIServer pid=1) INFO:     Application startup complete.
+(APIServer pid=1) INFO 10-09 01:55:21 [launcher.py:105] API server: HTTP server started
+(APIServer pid=1) INFO:     127.0.0.1:56896 - "GET /health HTTP/1.1" 200 OK
+(APIServer pid=1) INFO:     127.0.0.1:56908 - "GET /v1/models HTTP/1.1" 200 OK
+(APIServer pid=1) INFO:     127.0.0.1:56922 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(EngineCore pid=531) WARNING 10-09 01:55:22 [jit_monitor.py:135] Triton kernel JIT compilation during inference: _gemm_a8w8_blockscale_preshuffle_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=531) WARNING 10-09 01:55:22 [jit_monitor.py:135] Triton kernel JIT compilation during inference: _prepare_dflash_inputs_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(APIServer pid=1) INFO:     127.0.0.1:56938 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO:     127.0.0.1:58200 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO:     127.0.0.1:58214 - "GET /health HTTP/1.1" 200 OK
+(APIServer pid=1) INFO:     127.0.0.1:58222 - "GET /metrics HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 10-09 01:55:31 [loggers.py:310] Engine 000: Avg prompt throughput: 132.0 tokens/s, Avg generation throughput: 28.0 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 11.3%, Prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 10-09 01:55:31 [metrics.py:120] SpecDecoding metrics: Mean acceptance length: 3.54, Accepted throughput: 20.03 tokens/s, Drafted throughput: 55.21 tokens/s, Accepted: 541 tokens, Drafted: 1491 tokens, Per-position acceptance rate: 0.742, 0.568, 0.418, 0.315, 0.230, 0.155, 0.113, Avg Draft acceptance rate: 36.3%
+(APIServer pid=1) INFO:     127.0.0.1:58232 - "POST /v1/chat/completions HTTP/1.1" 200 OK

@@ -49,6 +49,7 @@ declare -A HELPERS=(
     ['$MOUNT_HELPER']=nexus-dashboard-mount
     ['$GPU_TUNE_HELPER']=nexus-dashboard-gpu-tune
     ['$NUT_HELPER']=nexus-dashboard-nut
+    ['$RADIANCE_HELPER']=nexus-dashboard-radiance
     ['$DLNA_RESCAN_HELPER']=nexus-dashboard-dlna-rescan
     ['$DLNA_STATS_HELPER']=nexus-dashboard-dlna-stats
 )

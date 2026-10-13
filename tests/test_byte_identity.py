@@ -95,6 +95,12 @@ def client(monkeypatch, tmp_path):
                         lambda: {'golden': 'halogen'})
     monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'alerts', lambda: [])
     monkeypatch.setitem(app._DESCRIPTORS['halogen'], 'metrics', lambda: [])
+    # radiance runs `systemctl show` (mocked to fail here) and would then read
+    # unit files / the loopback port on the box running the suite — stub likewise.
+    monkeypatch.setitem(app._DESCRIPTORS['radiance'], 'summary',
+                        lambda: {'golden': 'radiance'})
+    monkeypatch.setitem(app._DESCRIPTORS['radiance'], 'alerts', lambda: [])
+    monkeypatch.setitem(app._DESCRIPTORS['radiance'], 'metrics', lambda: [])
     # disks' growth alerts read smart_state.json next to app.py on the box.
     monkeypatch.setitem(app._DESCRIPTORS['disks'], 'alerts', lambda: [])
     # The updates summary block reports a live stat of /run/reboot-required —

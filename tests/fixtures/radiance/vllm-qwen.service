@@ -1,0 +1,38 @@
+# /etc/systemd/system/vllm-qwen.service  (node7, 1x R9700, amdgpu 31.60 DKMS + ROCm 10.1 host stack)
+[Unit]
+Description=vLLM Radiance Qwen3.8-27B-Uncensored NVFP4->MXFP4 + DFlash2 on 1x R9700 (replaces llama-server)
+After=docker.service network-online.target gpu-context-keeper.service
+Requires=docker.service
+# The keeper must hold its context BEFORE the engine spawns (fast/slow state is fixed at spawn).
+Wants=gpu-context-keeper.service
+Wants=network-online.target
+# llama-server owns port 8080 and the card; the two must never run together.
+Conflicts=llama-server.service
+
+[Service]
+Type=simple
+User=backupuser
+Group=backupuser
+WorkingDirectory=/home/backupuser/vllm-mxfp4
+Environment=HOME=/home/backupuser
+# GPUS=0 is the R9700 (renderD128); the 780M iGPU (renderD129, 4 GiB) is skipped by gpu-detect.
+Environment=RUNTIME=docker GPUS=0 PORT=8080 NAME=vllmnvfp4
+# orcarouter/Qwen3.8-27B-Uncensored-NVFP4 (gated HF repo, downloaded 2026-10-08), served through the
+# NVFP4 -> MXFP4 at-load requant (radiance_nvfp4.py). Weights load at 19.95 GiB, so vLLM's profiler
+# cannot find the KV it needs at 65k: KV_MEM is the repo's measured 1x7551-32624 pin (kv-profiles.tsv).
+Environment=SNAP=/home/backupuser/models/Qwen3.8-27B-Uncensored-NVFP4
+Environment=RADIANCE_NVFP4_MXFP4=1 KV_MEM=6539000000 GPU_UTIL=0.97 MAXLEN=65536 MAXSEQS=3
+Environment=SPEC_METHOD=dflash RADIANCE_NORMQUANT_FUSION=1 RADIANCE_FP8_STREAM=1
+Environment=CACHE=/home/backupuser/.radiance-cache-nvfp4unc-093
+# Repo template defaults reasoning effort to medium (as on node6); clients may send reasoning_effort.
+Environment=CHAT_TEMPLATE=/home/backupuser/vllm-mxfp4/qwen-fixed-v22.3.jinja
+Environment="SERVED_NAMES=Qwen3.8 Qwen3.6 Qwen3.8-Uncensored Qwen3.8-27B"
+# serve-tp1.sh pins TP=1 and turns on the single-GPU profile (fp16 ssm state, libr4d rx9).
+ExecStart=/home/backupuser/vllm-mxfp4/serve-tp1.sh
+ExecStop=/usr/bin/docker stop -t 30 vllmnvfp4
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

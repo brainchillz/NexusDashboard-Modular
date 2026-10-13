@@ -1,0 +1,14 @@
+Id=vllm-qwen.service
+LoadState=loaded
+Wants=network-online.target gpu-context-keeper.service
+Conflicts=shutdown.target llama-server.service
+ActiveState=active
+SubState=running
+FragmentPath=/etc/systemd/system/vllm-qwen.service
+DropInPaths=
+UnitFileState=enabled
+ActiveEnterTimestamp=Thu 2026-10-08 21:52:37 EDT
+NRestarts=0
+ExecStart={ path=/home/backupuser/vllm-mxfp4/serve-tp1.sh ; argv[]=/home/backupuser/vllm-mxfp4/serve-tp1.sh ; ignore_errors=no ; start_time=[Thu 2026-10-08 21:52:37 EDT] ; stop_time=[n/a] ; pid=21171 ; code=(null) ; status=0/0 }
+ExecStop={ path=/usr/bin/docker ; argv[]=/usr/bin/docker stop -t 30 vllmnvfp4 ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+Environment=HOME=/home/backupuser RUNTIME=docker GPUS=0 PORT=8080 NAME=vllmnvfp4 SNAP=/home/backupuser/models/Qwen3.8-27B-Uncensored-NVFP4 RADIANCE_NVFP4_MXFP4=1 KV_MEM=6539000000 GPU_UTIL=0.97 MAXLEN=65536 MAXSEQS=3 SPEC_METHOD=dflash RADIANCE_NORMQUANT_FUSION=1 RADIANCE_FP8_STREAM=1 CACHE=/home/backupuser/.radiance-cache-nvfp4unc-093 CHAT_TEMPLATE=/home/backupuser/vllm-mxfp4/qwen-fixed-v22.3.jinja "SERVED_NAMES=Qwen3.8 Qwen3.6 Qwen3.8-Uncensored Qwen3.8-27B"

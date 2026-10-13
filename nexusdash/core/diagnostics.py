@@ -351,8 +351,29 @@ def _probe_halogen():
                '' if ok else 'compose file missing under %s' % wd)]
 
 
+def _probe_radiance():
+    from ..modules import radiance as rd
+    out = []
+    unit = rd._unit()
+    if os.geteuid() == 0:
+        out.append(_c('radiance', 'radiance:write', 'Boot-parameter drop-in write path', 'ok',
+                      'dashboard runs as root — writes %s directly' % rd._dropin_path(unit)))
+    else:
+        ok = os.path.isfile(rd.RADIANCE_HELPER) and os.access(rd.RADIANCE_HELPER, os.X_OK)
+        out.append(_c('radiance', 'helper:radiance', 'Root helper %s' % os.path.basename(rd.RADIANCE_HELPER),
+                      'ok' if ok else 'fail', rd.RADIANCE_HELPER if ok else 'missing: ' + rd.RADIANCE_HELPER,
+                      '' if ok else FIX_HELPERS))
+    present = any(os.path.isfile(os.path.join(d, unit + '.service'))
+                  for d in ('/etc/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system'))
+    out.append(_c('radiance', 'radiance:unit', 'vLLM Radiance unit %s.service' % unit,
+                  'ok' if present else 'warn', 'present' if present else 'not found on this node',
+                  '' if present else 'install the vllm-radiance launcher unit, or set DASHBOARD_RADIANCE_UNIT'))
+    return out
+
+
 _MODULE_PROBES = {'dnsmasq': _probe_dnsmasq, 'llamacpp': _probe_llama_backup,
-                  'docker': _probe_docker_socket, 'halogen': _probe_halogen}
+                  'docker': _probe_docker_socket, 'halogen': _probe_halogen,
+                  'radiance': _probe_radiance}
 
 
 @bp.route('/api/diagnostics')

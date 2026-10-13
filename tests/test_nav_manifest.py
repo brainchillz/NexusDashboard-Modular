@@ -41,6 +41,8 @@ EXPECTED_NAV = [
         ('models', 'Models', 'dl', 'llamacpp', False),
         # 3.5.0: the halogen-flash-server compose stack (default-off module).
         ('halogen', 'Halogen', 'mon', 'halogen', False),
+        # 3.9.0: the vLLM Radiance systemd unit (default-off module).
+        ('radiance', 'Radiance', 'flame', 'radiance', False),
         ('gpu', 'GPU', 'cpu', 'gpu', False)]),
     ('lxd', 'LXD / Incus', [
         ('instances', 'Instances', 'mon', 'instances', False),

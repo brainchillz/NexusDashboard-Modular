@@ -206,6 +206,9 @@ dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-gpu-tune
 # RHEL), and restores the previous file if the daemon refuses to come back
 # after applying it. Trust boundary; not writable by dashboard.
 dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-nut
+# Radiance module: a root-owned helper that writes the dashboard's boot-parameter
+# drop-in beside the vLLM Radiance unit (re-validates the file's shape itself).
+dashboard ALL=(ALL) NOPASSWD: /usr/local/sbin/nexus-dashboard-radiance
 # MiniDLNA DB rebuild: root-owned helper that stops the service, deletes files.db
 # (confined to the hard-coded cache dir), and starts. rm/minidlnad as root are
 # escalation-sensitive, so they go through this wrapper. Trust boundary.
@@ -1324,6 +1327,136 @@ if __name__ == '__main__':
 HELPER
 chown root:root "$NUT_HELPER"
 chmod 755 "$NUT_HELPER"
+
+# Radiance module helper (3.9.0): the ONLY privileged surface of the Radiance
+# page on a node whose dashboard is not root — it writes the dashboard's
+# boot-parameter drop-in beside the vLLM Radiance unit and daemon-reloads.
+# It re-validates the drop-in's shape independently of the app and can write
+# nothing else. NOT writable by dashboard.
+RADIANCE_HELPER="/usr/local/sbin/${HELPER_PREFIX}-radiance"
+cat > "$RADIANCE_HELPER" << 'HELPER'
+#!/usr/bin/env python3
+# Root-owned helper for the Nexus Dashboard radiance module.
+#
+#   write-dropin <unit>   (drop-in text on stdin) write
+#                         /etc/systemd/system/<unit>.service.d/50-nexus-dashboard.conf
+#                         atomically (root:root 0644) and `systemctl daemon-reload`.
+#   reset <unit>          remove that one file (and the .d dir when it is then
+#                         empty) and `systemctl daemon-reload`.
+#
+# Trust boundary. The dashboard validates every parameter for the UI; this
+# helper re-validates the whole file independently: the unit name is a plain
+# systemd name (no slash, no `..`), the text is capped at 16 KiB, and every
+# non-blank line must be a `#` comment, `[Service]`, or ONE
+# `Environment=KEY=VALUE` (double-quoted when the value holds spaces) whose
+# key is UPPER_CASE and whose value is drawn from a charset with no quote,
+# backslash or `$`. `EXTRA` (raw vllm arguments) is refused by name. It runs
+# exactly one command, `systemctl daemon-reload`, with fixed argv.
+import os
+import re
+import sys
+import subprocess
+
+SYSTEMD_DIR = '/etc/systemd/system'
+DROPIN = '50-nexus-dashboard.conf'
+RE_UNIT = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$')
+RE_ENV = re.compile(r'^Environment=(?:"([A-Z][A-Z0-9_]{0,63})=([A-Za-z0-9 ._,:/@+=-]{0,512})"|([A-Z][A-Z0-9_]{0,63})=([A-Za-z0-9._,:/@+=-]{0,512}))$')
+# The one non-Environment line allowed: a TP change on a unit that starts
+# through a serve-tpN.sh wrapper is `ExecStart=` (clear) + `ExecStart=<the
+# sibling serve-tpN.sh>` — an absolute path whose basename is that wrapper.
+RE_EXEC = re.compile(r'^ExecStart=(|/[A-Za-z0-9._@+/-]{1,255}/serve-tp[0-9]{1,2}\.sh)$')
+REFUSED_KEYS = ('EXTRA',)
+MAX_BYTES = 16 * 1024
+
+
+def die(msg, rc=2):
+    sys.stderr.write('radiance helper: %s\n' % msg)
+    sys.exit(rc)
+
+
+def unit_dir(unit):
+    if not RE_UNIT.match(unit) or '..' in unit:
+        die('bad unit name')
+    if unit.endswith('.service'):
+        unit = unit[:-8]
+    return os.path.join(SYSTEMD_DIR, unit + '.service.d')
+
+
+def validate(text):
+    if len(text.encode('utf-8', 'replace')) > MAX_BYTES:
+        die('drop-in too large')
+    if '\0' in text:
+        die('NUL in drop-in')
+    seen_section = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line == '[Service]':
+            seen_section = True
+            continue
+        if RE_EXEC.match(line):
+            if not seen_section:
+                die('ExecStart= before [Service]')
+            continue
+        m = RE_ENV.match(line)
+        if not m:
+            die('refused line: %r' % raw[:120])
+        key = m.group(1) or m.group(3)
+        if key in REFUSED_KEYS:
+            die('%s is not written by the dashboard' % key)
+        if not seen_section:
+            die('Environment= before [Service]')
+    return text
+
+
+def daemon_reload():
+    r = subprocess.run(['systemctl', 'daemon-reload'], capture_output=True, text=True)
+    if r.returncode != 0:
+        die('daemon-reload failed: ' + (r.stderr or r.stdout).strip(), 1)
+
+
+def write_dropin(unit):
+    d = unit_dir(unit)
+    text = validate(sys.stdin.read())
+    os.makedirs(d, 0o755, exist_ok=True)
+    tmp = os.path.join(d, '.' + DROPIN + '.tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    with os.fdopen(fd, 'w') as f:
+        f.write(text)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, os.path.join(d, DROPIN))
+    daemon_reload()
+
+
+def reset(unit):
+    d = unit_dir(unit)
+    p = os.path.join(d, DROPIN)
+    if os.path.exists(p):
+        os.remove(p)
+    try:
+        os.rmdir(d)
+    except OSError:
+        pass
+    daemon_reload()
+
+
+def main():
+    if len(sys.argv) != 3 or sys.argv[1] not in ('write-dropin', 'reset'):
+        die('usage: write-dropin <unit> (text on stdin) | reset <unit>')
+    if os.geteuid() != 0:
+        die('must run as root')
+    if sys.argv[1] == 'write-dropin':
+        write_dropin(sys.argv[2])
+    else:
+        reset(sys.argv[2])
+
+
+if __name__ == '__main__':
+    main()
+HELPER
+chown root:root "$RADIANCE_HELPER"
+chmod 755 "$RADIANCE_HELPER"
 
 info "Setting up the llama.cpp models directory..."
 # Group-writable models dir: the dashboard downloads GGUFs straight into it, so

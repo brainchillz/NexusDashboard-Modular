@@ -1,7 +1,7 @@
 {
-  "hits": 388123,
-  "misses": 48291,
-  "evictions": 168,
-  "insertions": 348731,
-  "ts": 1790378729
+  "hits": 446032,
+  "misses": 47390,
+  "evictions": 0,
+  "insertions": 220844,
+  "ts": 1791874217
 }
