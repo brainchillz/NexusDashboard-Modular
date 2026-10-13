@@ -509,3 +509,81 @@ def test_tp_override_swaps_the_wrapper(fake, monkeypatch):
     # a TP change is a shape change: under the unit's byte pin it asks first
     r = fake.client.post('/api/radiance/params', json={'overrides': {'TP': '2'}}).get_json()
     assert r['needs_confirm'] and 'TP' in r['warning']
+
+
+# ─── The PARO launcher shape (node6: run_paroquant.sh, 2x R9700) ───────
+
+PARO_UNIT = '''[Unit]
+Description=vLLM Qwen3.8-27B int5 ParoQuant + DFlash2 on 2x R9700 (replaces llama-server)
+[Service]
+Type=simple
+User=backupuser
+Environment=HOME=/home/backupuser
+Environment=RUNTIME=docker MODE=prod MODEL_DIR=Qwen3.8-27B-PARO-int5 SPEC=7 PORT=8080 GPUS=0,1
+Environment=R4D_KEY=b9e42ab-rx6
+Environment="SERVED_NAMES=Qwen3.8 Qwen3.8-PARO Qwen3.8-27B"
+ExecStart=/home/backupuser/vllm-mxfp4/paroquant/run_paroquant.sh
+ExecStop=/usr/bin/docker stop -t 30 vllmparo
+[Install]
+WantedBy=multi-user.target
+'''
+PARO_MODELS = json.dumps({'object': 'list', 'data': [
+    {'id': 'Qwen3.8', 'object': 'model', 'root': '/models/Qwen3.8-27B-PARO-int5', 'max_model_len': 262144},
+    {'id': 'Qwen3.8-PARO', 'object': 'model', 'root': '/models/Qwen3.8-27B-PARO-int5', 'max_model_len': 262144}]})
+
+
+@pytest.fixture
+def paro(fake, monkeypatch):
+    show = _show_text(
+        Environment='HOME=/home/backupuser RUNTIME=docker MODE=prod MODEL_DIR=Qwen3.8-27B-PARO-int5 SPEC=7 PORT=8080 GPUS=0,1 '
+                    'R4D_KEY=b9e42ab-rx6 CHAT_TEMPLATE=/home/backupuser/vllm-mxfp4/qwen-fixed-v22.3.jinja '
+                    '"SERVED_NAMES=Qwen3.8 Qwen3.8-PARO Qwen3.8-27B"',
+        ExecStart='{ path=/home/backupuser/vllm-mxfp4/paroquant/run_paroquant.sh ; argv[]=/home/backupuser/vllm-mxfp4/paroquant/run_paroquant.sh ; ignore_errors=no }',
+        ExecStop='{ path=/usr/bin/docker ; argv[]=/usr/bin/docker stop -t 30 vllmparo ; ignore_errors=no }')
+    fake.show = show
+    real_read = rd._read_text
+    monkeypatch.setattr(rd, '_read_text', lambda p: PARO_UNIT if p == UNIT_PATH else real_read(p))
+    def http(base, path, timeout):
+        if path == '/v1/models':
+            return PARO_MODELS, None
+        return fake.http(base, path, timeout)
+    monkeypatch.setattr(rd, '_http_get', http)
+    def draw(method, path, body=None, timeout=60):
+        assert path.startswith('/containers/vllmparo/logs?'), path
+        return fake.docker_raw(method, path.replace('vllmparo', 'vllmnvfp4'), body, timeout)
+    monkeypatch.setattr(rd, 'docker_raw', draw)
+    return fake
+
+
+def test_paro_launcher_shape(paro):
+    assert rd.parse_exec_stop_name(rd.parse_show(paro.show)['ExecStop']) == 'vllmparo'
+    assert rd.parse_exec_stop_name('{ path=/usr/bin/docker ; argv[]=/usr/bin/docker stop -t 30 vllmnvfp4 ; }') == 'vllmnvfp4'
+    assert rd.parse_exec_stop_name('') == ''
+    st = paro.client.get('/api/radiance').get_json()
+    assert st['container'] == 'vllmparo'                 # from ExecStop — NAME is not in the environment
+    assert st['tp'] == '2' and st['launcher_tp'] is None  # two GPUS, no wrapper, no TP= → implied
+    assert st['checkpoint'] == 'Qwen3.8-27B-PARO-int5'    # MODEL_DIR, not SNAP
+    rows = {k['key']: k for k in st['knobs']}
+    assert rows['TP']['value'] == '2' and rows['TP']['source'] == 'gpus'
+    assert rows['MODEL_DIR']['source'] == 'unit' and rows['MODE']['value'] == 'prod'
+    assert rows['R4D_KEY']['group'] == 'other' and rows['R4D_KEY']['type'] == 'readonly'
+    assert 'HOME' not in rows
+    s = rd._radiance_summary()
+    assert s['model'] == 'Qwen3.8-27B-PARO-int5' and s['served_name'] == 'Qwen3.8' and s['tp'] == '2'
+    # a TP override on a non-wrapper launcher is a plain Environment= line
+    r = paro.client.post('/api/radiance/params', json={'overrides': {'TP': '4'}}).get_json()
+    assert r['success'] and 'Environment=TP=4' in paro.dropin.read_text()
+    # MODEL_DIR is a directory NAME; a path or junk is refused
+    for bad in ('/models/x', '../x', 'a b'):
+        assert paro.client.post('/api/radiance/params', json={'overrides': {'MODEL_DIR': bad}}).status_code == 400
+    r = paro.client.post('/api/radiance/params', json={'overrides': {'MODEL_DIR': 'Qwen3.8-27B-PARO-MXFP4-ft', 'MODE': 'eval'}}).get_json()
+    assert r['success'] and r['overrides'] == {'MODEL_DIR': 'Qwen3.8-27B-PARO-MXFP4-ft', 'MODE': 'eval'}
+
+
+def test_checkpoint_falls_back_to_the_served_models_root(paro):
+    # neither SNAP nor MODEL_DIR in the environment → /v1/models' root names the weights
+    paro.show = _show_text(Environment='RUNTIME=docker PORT=8080 GPUS=0,1',
+                           ExecStop='{ path=/usr/bin/docker ; argv[]=/usr/bin/docker stop -t 30 vllmparo ; }')
+    st = paro.client.get('/api/radiance').get_json()
+    assert st['checkpoint'] == 'Qwen3.8-27B-PARO-int5'
+    assert rd._radiance_summary()['model'] == 'Qwen3.8-27B-PARO-int5'

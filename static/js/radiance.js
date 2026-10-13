@@ -14,13 +14,16 @@ function rdStateBadge(st) {
 }
 function rdSourceBadge(s) {
   return s === 'override' ? '<span class="status-badge yellow" title="set by the dashboard drop-in">override</span>'
+    : s === 'launcher' ? '<span class="status-badge gray" title="pinned by the serve-tpN.sh wrapper the unit starts through">launcher</span>'
+    : s === 'gpus' ? '<span class="status-badge gray" title="implied by the GPUS list (the launcher default)">from GPUS</span>'
     : s === 'unit' ? '<span class="status-badge gray" title="set in the unit file">unit</span>'
     : '<span class="status-badge gray" style="opacity:.6" title="serve-mxfp4.sh default">default</span>';
 }
-const RD_GROUPS = [['shape', 'Serving shape'], ['paths', 'Checkpoints & paths'], ['serving', 'Serving'], ['advanced', 'Engine flags (RADIANCE_*)']];
+const RD_GROUPS = [['shape', 'Serving shape'], ['paths', 'Checkpoints & paths'], ['serving', 'Serving'], ['advanced', 'Engine flags (RADIANCE_*)'], ['other', 'Other unit settings (read-only)']];
 
 function rdInput(k, editable, models) {
   const v = k.value == null ? '' : String(k.value);
+  if (k.type === 'readonly') return `<span class="mono">${escapeHtml(v)}</span>`;
   const dis = editable ? '' : 'disabled';
   const id = `rd-k-${k.key}`;
   if (k.type === 'enum') {

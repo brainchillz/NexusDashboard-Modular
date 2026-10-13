@@ -66,7 +66,7 @@ WARM_START_S = 180                      # ~3 min warm (compile cache hit); the U
 
 SHOW_PROPS = ('Id,LoadState,ActiveState,SubState,UnitFileState,FragmentPath,DropInPaths,'
               'NRestarts,ActiveEnterTimestamp,ActiveEnterTimestampMonotonic,MainPID,Environment,'
-              'ExecStart,Conflicts')
+              'ExecStart,ExecStop,Conflicts')
 UNIT_ACTIONS = ('start', 'stop', 'restart', 'enable', 'disable')
 
 # ─── The knob allowlist ───────────────────────────────────────────────
@@ -86,6 +86,7 @@ RE_FLOAT = re.compile(r'^\d{1,3}(\.\d{1,4})?\Z')
 RE_ADV_KEY = re.compile(r'^RADIANCE_[A-Z0-9_]{1,48}\Z')
 RE_ADV_VAL = re.compile(r'^[A-Za-z0-9._,:/-]{1,64}\Z')
 RE_ENV_KEY = re.compile(r'^[A-Z][A-Z0-9_]{0,63}\Z')
+RE_DIRNAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
 
 KNOBS = [
     ('TP', 'shape', 'int', (1, 8), 'auto',
@@ -120,7 +121,12 @@ KNOBS = [
     ('MIN_GPU_MIB', 'shape', 'int', (256, 1048576), '8192',
      'VRAM floor for a card to count as usable (skips iGPUs).'),
     ('SNAP', 'paths', 'path', None, '$MODELS/Qwen3.8-27B-MXFP4-mtpfp8',
-     'The target checkpoint directory (must live under MODELS — it is the only mount).'),
+     'The target checkpoint directory (must live under MODELS — it is the only mount). '
+     'serve-mxfp4.sh launchers.'),
+    ('MODEL_DIR', 'paths', 'dirname', None, 'Qwen3.8-27B-PARO',
+     'PARO launcher (run_paroquant.sh): the checkpoint directory NAME under MODELS.'),
+    ('MODE', 'shape', 'enum', ('prod', 'eval'), 'eval',
+     'PARO launcher (run_paroquant.sh): prod serving profile or eval.'),
     ('DRAFTER', 'paths', 'path', None, '$MODELS/Qwen3.8-27B-DFlash2-FP8',
      'The dflash drafter checkpoint (ignored under SPEC_METHOD=mtp).'),
     ('MODELS', 'paths', 'path', None, '~/models',
@@ -145,7 +151,10 @@ KNOB_INDEX = {k[0]: k for k in KNOBS}
 # Changing any of these invalidates a KV_MEM byte pin (kv-profiles.tsv rows
 # are per batch shape): the write refuses without confirm.
 SHAPE_KEYS = ('TP', 'GPUS', 'MAXLEN', 'MAXSEQS', 'CHUNK', 'SPEC_METHOD', 'SPEC', 'GPU_UTIL',
-              'SINGLE_GPU_PROFILE', 'SNAP', 'IMAGE')
+              'SINGLE_GPU_PROFILE', 'SNAP', 'MODEL_DIR', 'MODE', 'IMAGE')
+# Unit environment that is neither a knob nor a RADIANCE_* flag is shown
+# read-only (the page must not hide what the unit sets); these are noise.
+HIDDEN_ENV = ('HOME', 'PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'INVOCATION_ID', 'JOURNAL_STREAM')
 NEVER_OFFERED = ('EXTRA',)       # free-text vllm args — refused outright
 
 
@@ -190,6 +199,10 @@ def validate_knob(key, value):
         if not RE_KNOB_PATH.match(value) or '/../' in value or value.endswith('/..'):
             return None, '%s must be an absolute path (letters, digits . _ @ + - /)' % key
         return value, None
+    if typ == 'dirname':
+        if not RE_DIRNAME.match(value) or value in ('.', '..'):
+            return None, '%s must be a directory name (letters, digits . _ -), not a path' % key
+        return value, None
     if typ == 'names':
         if not RE_SERVED_NAMES.match(value):
             return None, '%s: space-separated model names (letters, digits . _ -)' % key
@@ -215,6 +228,16 @@ def parse_exec_start(show_value):
     """`systemctl show`'s ExecStart (`{ path=/x/serve-tp1.sh ; argv[]=… }`) →
     the launcher path, or '' . Pure."""
     m = RE_EXEC_PATH.search(show_value or '')
+    return m.group(1) if m else ''
+
+
+RE_STOP_NAME = re.compile(r'argv\[\]=(?:\S+/)?(?:docker|podman) stop(?: -t \d+)? ([A-Za-z0-9][A-Za-z0-9_.-]*)')
+
+
+def parse_exec_stop_name(show_value):
+    """The container ExecStop stops (`docker stop -t 30 vllmparo`) — the
+    launcher's NAME when the unit does not set it in Environment. Pure."""
+    m = RE_STOP_NAME.search(show_value or '')
     return m.group(1) if m else ''
 
 
@@ -530,6 +553,9 @@ def _knob_rows(env, base, overrides, st):
             value = st['launcher_tp']                 # pinned by the serve-tpN.sh wrapper
             unit_value = st.get('unit_launcher_tp')
             source = 'override' if 'TP' in overrides else 'launcher'
+        elif key == 'TP' and 'TP' not in env and st.get('tp'):
+            value = st['tp']                          # implied by the GPUS list
+            source = 'gpus'
         rows.append({'key': key, 'group': group, 'type': typ,
                      'range': list(arg) if typ in ('int', 'float') else None,
                      'choices': list(arg) if typ == 'enum' else None,
@@ -542,6 +568,12 @@ def _knob_rows(env, base, overrides, st):
                          'value': env.get(key), 'unit_value': base.get(key), 'override': overrides.get(key),
                          'source': 'override' if key in overrides else 'unit',
                          'default': '', 'help': 'Kernel / engine flag read by serve-mxfp4.sh (see DOCKERHUB.md).'})
+    for key in sorted(env):
+        if key in KNOB_INDEX or RE_ADV_KEY.match(key) or key in HIDDEN_ENV:
+            continue
+        rows.append({'key': key, 'group': 'other', 'type': 'readonly', 'range': None, 'choices': None,
+                     'value': env.get(key), 'unit_value': base.get(key), 'override': None, 'source': 'unit',
+                     'default': '', 'help': 'Set by the unit; not a parameter this page edits.'})
     return rows
 
 
@@ -590,16 +622,24 @@ def _base_status(full=False):
             st['overrides']['TP'] = swapped
     st['other_dropins'] = [p for p in (s.get('DropInPaths') or '').split() if p and p != st['dropin']]
     st['port'] = int(_num(env.get('PORT')) or DEFAULT_PORT)
-    st['container'] = env.get('NAME') or DEFAULT_NAME
+    st['container'] = env.get('NAME') or parse_exec_stop_name(s.get('ExecStop', '')) or DEFAULT_NAME
     st['url'] = RADIANCE_URL or 'http://127.0.0.1:%d' % st['port']
-    st['checkpoint'] = os.path.basename((env.get('SNAP') or '').rstrip('/')) or None
+    st['checkpoint'] = (os.path.basename((env.get('SNAP') or '').rstrip('/')) or env.get('MODEL_DIR') or None)
     st['image'] = env.get('IMAGE') or KNOB_INDEX['IMAGE'][4]
-    st['tp'] = env.get('TP') or st['launcher_tp'] or ('1' if env.get('GPUS') and ',' not in env['GPUS'] else None)
+    gpus = [g for g in (env.get('GPUS') or '').split(',') if g.strip()]
+    st['tp'] = env.get('TP') or st['launcher_tp'] or (str(len(gpus)) if gpus else None)
+    st['models'] = []
     if st['running']:
         text, e = _http_get(st['url'], '/metrics', 3)
         sums, model = parse_metrics(text) if text else ({}, None)
         st['metrics'] = metrics_summary(sums, model)
         st['metrics_error'] = e
+        # /v1/models is local and instant; its `root` names the loaded
+        # checkpoint when the unit's environment does not (PARO launcher).
+        text, _ = _http_get(st['url'], '/v1/models', 3)
+        st['models'] = parse_models(text) if text else []
+        if not st['checkpoint'] and st['models'] and st['models'][0].get('root'):
+            st['checkpoint'] = os.path.basename(str(st['models'][0]['root']).rstrip('/')) or None
     if full:
         st['knobs'] = _knob_rows(env, st['unit_env'], st['overrides'], st)
         st['dropin_text'] = dtext
@@ -612,8 +652,6 @@ def _base_status(full=False):
                 st['version'] = (json.loads(text) or {}).get('version') if text else None
             except ValueError:
                 st['version'] = None
-            text, _ = _http_get(st['url'], '/v1/models', 3)
-            st['models'] = parse_models(text) if text else []
             st['startup'] = startup_summary(_container_logs(st['container'], 3000))
     return st
 
